@@ -50,16 +50,77 @@
     }
   },
   "entity": {
-    "sensor": {
+    "number": {
       "preset": {
         "name": "Preset"
       },
+      "input_gain": {
+        "name": "Input {channel} gain"
+      },
+      "output_gain": {
+        "name": "Output {channel} gain"
+      },
+      "crosspoint_gain": {
+        "name": "Input {input} to output {output} gain"
+      },
+      "input_group_gain": {
+        "name": "Input group {group} gain"
+      },
+      "output_group_gain": {
+        "name": "Output group {group} gain"
+      },
+      "crosspoint_group_gain": {
+        "name": "Crosspoint group {group} gain"
+      }
+    },
+    "sensor": {
       "unit_name": {
         "name": "Unit name"
       },
       "response_time": {
         "name": "Response time"
       }
+    },
+    "switch": {
+      "input_mute": {
+        "name": "Input {channel} mute"
+      },
+      "output_mute": {
+        "name": "Output {channel} mute"
+      },
+      "crosspoint_mute": {
+        "name": "Input {input} to output {output} mute"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Channels and controls",
+        "description": "Choose which channels and controls are created. The iDR always has 16 input and 16 output channels, but only the channels that are wired need an entity.",
+        "data": {
+          "inputs": "Number of input channels",
+          "outputs": "Number of output channels",
+          "expose_groups": "Group gains",
+          "expose_crosspoints": "Crosspoint gain and mute",
+          "scan_interval": "Update interval"
+        },
+        "data_description": {
+          "inputs": "Input channels 1 up to this number get a gain and mute entity.",
+          "outputs": "Output channels 1 up to this number get a gain and mute entity.",
+          "expose_groups": "Create gain entities for the 8 input groups, 8 output groups and 16 crosspoint groups.",
+          "expose_crosspoints": "Create a gain and mute entity for every crosspoint (inputs x outputs). This can be a lot of entities.",
+          "scan_interval": "How often the state of the iDR is read, in seconds."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "The iDR could not be updated: {error}"
+    },
+    "not_applied": {
+      "message": "The iDR did not apply the value {requested}. It reports {actual}."
     }
   }
 }

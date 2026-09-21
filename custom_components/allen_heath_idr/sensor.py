@@ -29,12 +29,6 @@ class IdrSensorEntityDescription(SensorEntityDescription):
 
 SENSORS: tuple[IdrSensorEntityDescription, ...] = (
     IdrSensorEntityDescription(
-        key="preset",
-        translation_key="preset",
-        icon="mdi:playlist-play",
-        value_fn=lambda data: data.preset,
-    ),
-    IdrSensorEntityDescription(
         key="unit_name",
         translation_key="unit_name",
         icon="mdi:tag-text-outline",

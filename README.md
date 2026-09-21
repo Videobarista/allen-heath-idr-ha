@@ -19,14 +19,13 @@ any cloud.
 
 ## Status
 
-Early development. Version 0.1.0 provides the connection and a few diagnostic
-sensors. Control of the audio matrix follows in the next versions.
+Early development, but usable: the integration reads and controls the audio
+matrix of the iDR.
 
 | Version | Content |
 | ------- | ------- |
-| 0.1.0 | Connection, config flow, preset, unit name and response time sensors |
-| planned | Input and output channel mute and gain |
-| planned | Group gains, preset recall, crosspoint gain and mute |
+| 0.1.0 | Connection, config flow, diagnostic sensors |
+| 0.2.0 | Input and output gain and mute, preset recall, optional group gains and crosspoints, options |
 
 ## Requirements
 
@@ -59,13 +58,47 @@ changed it. Fill in the password only when one has been set on the unit.
 
 The address, port and password can be changed later with **Reconfigure**.
 
+### Options
+
+Open the integration and choose **Configure** to decide what is created:
+
+| Option | Default | Description |
+| ------ | ------- | ----------- |
+| Number of input channels | 8 | Input channels 1 up to this number get a gain and mute entity |
+| Number of output channels | 8 | Output channels 1 up to this number get a gain and mute entity |
+| Group gains | off | Gain entities for the 8 input groups, 8 output groups and 16 crosspoint groups |
+| Crosspoint gain and mute | off | A gain and mute entity for every crosspoint (inputs x outputs) |
+| Update interval | 10 s | How often the unit is read |
+
+The iDR always has 16 input and 16 output channels in its matrix. Only channels
+that you use need an entity. Crosspoints multiply quickly: 8 x 8 gives 128
+entities, 16 x 16 gives 512.
+
 ## Entities
 
 | Entity | Description |
 | ------ | ----------- |
-| Preset | Number of the preset that is currently active |
+| Preset (number) | The active preset. Setting a value **recalls that preset immediately** |
+| Input / Output gain (number) | Gain in dB in steps of 0.5 |
+| Input / Output mute (switch) | On means muted |
+| Group gain (number, optional) | Master gain of an input, output or crosspoint group |
+| Crosspoint gain (number, optional) | Level of an input on an output |
+| Crosspoint mute (switch, optional) | Mute of an input on an output |
 | Unit name (diagnostic) | Name of the unit as set on the iDR |
 | Response time (diagnostic) | Time the iDR needed to answer a request, in milliseconds |
+
+### Gain values
+
+The gain of a channel, group or crosspoint can be switched off completely
+(-infinity). A number entity shows this as its lowest value: -60 dB for channels,
+-41 dB for crosspoints and -65 dB for groups. The attribute `off` is `true` in
+that case. Setting the lowest value, or anything below the lowest real gain,
+switches the gain off.
+
+After every change the integration reads the value back from the iDR. What you
+see is what the unit reports, so a value that the unit rounds to its own step is
+shown as rounded. When the unit does not apply a value, Home Assistant shows an
+error.
 
 ## Good to know
 
@@ -73,7 +106,10 @@ The address, port and password can be changed later with **Reconfigure**.
   integration therefore keeps a single connection open and sends commands one
   after another. The unit allows up to 10 simultaneous Telnet connections.
 - Changes made on the unit or in iDR System Manager are picked up when Home
-  Assistant polls the unit, every 10 seconds.
+  Assistant polls the unit (every 10 seconds by default). Changes made from
+  Home Assistant show immediately.
+- Recalling a preset changes levels and routing on the unit, and all values are
+  read again afterwards.
 - The Telnet protocol is not encrypted, and a password (if set) is sent as
   plain text. Keep the iDR on a trusted network or VLAN.
 - The password handling follows the protocol description of Allen & Heath and has

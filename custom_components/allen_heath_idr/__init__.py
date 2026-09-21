@@ -9,7 +9,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from .client import IdrClient
 from .coordinator import IdrConfigEntry, IdrCoordinator
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: IdrConfigEntry) -> bool:
@@ -27,6 +27,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: IdrConfigEntry) -> bool:
         raise
 
     entry.async_on_unload(client.async_close)
+    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
@@ -35,3 +36,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: IdrConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: IdrConfigEntry) -> bool:
     """Unload a config entry."""
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def _async_reload_entry(hass: HomeAssistant, entry: IdrConfigEntry) -> None:
+    """Reload the entry when the options have changed."""
+    await hass.config_entries.async_reload(entry.entry_id)

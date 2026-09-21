@@ -2,28 +2,49 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT
+from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
 )
 
 from .client import (
+    MAX_CHANNELS,
     IdrAuthError,
     IdrClient,
     IdrConnectionError,
     IdrError,
     IdrIdentity,
 )
-from .const import DEFAULT_PORT, DOMAIN
+from .const import (
+    CONF_CROSSPOINTS,
+    CONF_GROUPS,
+    CONF_INPUTS,
+    CONF_OUTPUTS,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_PORT,
+    DOMAIN,
+    MAX_SCAN_INTERVAL,
+    MIN_SCAN_INTERVAL,
+)
+from .coordinator import IdrOptions
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,6 +85,12 @@ class IdrConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle the config flow for an Allen & Heath iDR."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        """Return the options flow."""
+        return IdrOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -161,3 +188,51 @@ class IdrConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
             errors=errors,
         )
+
+
+class IdrOptionsFlow(OptionsFlow):
+    """Handle the options of an Allen & Heath iDR."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask which channels and controls to expose."""
+        if user_input is not None:
+            return self.async_create_entry(
+                data={
+                    CONF_INPUTS: int(user_input[CONF_INPUTS]),
+                    CONF_OUTPUTS: int(user_input[CONF_OUTPUTS]),
+                    CONF_GROUPS: bool(user_input[CONF_GROUPS]),
+                    CONF_CROSSPOINTS: bool(user_input[CONF_CROSSPOINTS]),
+                    CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
+                }
+            )
+        current = IdrOptions.from_mapping(self.config_entry.options)
+        channels = NumberSelector(
+            NumberSelectorConfig(
+                min=1, max=MAX_CHANNELS, step=1, mode=NumberSelectorMode.BOX
+            )
+        )
+        interval = NumberSelector(
+            NumberSelectorConfig(
+                min=MIN_SCAN_INTERVAL,
+                max=MAX_SCAN_INTERVAL,
+                step=1,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="s",
+            )
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_INPUTS, default=current.inputs): channels,
+                vol.Required(CONF_OUTPUTS, default=current.outputs): channels,
+                vol.Required(CONF_GROUPS, default=current.groups): BooleanSelector(),
+                vol.Required(
+                    CONF_CROSSPOINTS, default=current.crosspoints
+                ): BooleanSelector(),
+                vol.Required(CONF_SCAN_INTERVAL, default=current.scan_interval): (
+                    interval
+                ),
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)

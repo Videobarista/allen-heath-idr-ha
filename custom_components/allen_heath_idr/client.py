@@ -15,11 +15,11 @@ This module has no Home Assistant dependencies.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from enum import StrEnum
 import logging
 import math
 import re
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Final
 
 _LOGGER = logging.getLogger(__name__)
@@ -143,7 +143,7 @@ def parse_gain(reply: str) -> float:
 def format_gain(gain: float) -> str:
     """Convert a gain in dB to the text the iDR expects."""
     if gain == -math.inf:
-        return "-INF"
+        return "-Inf"
     return f"{gain:.1f}"
 
 
@@ -417,15 +417,6 @@ class IdrClient:
             raise ValueError(f"{kind} gain {gain} is outside {lower}..{upper} dB")
         command = _build_command("SET", kind, indices, format_gain(gain))
         _raise_if_error(await self.async_command(command))
-
-    async def async_step_gain(
-        self, kind: GainType, indices: tuple[int, ...], *, increase: bool
-    ) -> None:
-        """Raise or lower a gain by one step of the iDR."""
-        _validate_indices(kind, indices, _GAIN_INDEX_LIMITS[kind])
-        verb = "INC" if increase else "DEC"
-        command = _build_command(verb, kind, indices)
-        _raise_if_error(await self.async_command(command, retry=False))
 
     async def async_get_mute(self, kind: MuteType, indices: tuple[int, ...]) -> bool:
         """Return a mute state (True means muted)."""

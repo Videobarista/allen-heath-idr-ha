@@ -50,16 +50,77 @@
     }
   },
   "entity": {
-    "sensor": {
+    "number": {
       "preset": {
         "name": "Preset"
       },
+      "input_gain": {
+        "name": "Ingang {channel} gain"
+      },
+      "output_gain": {
+        "name": "Uitgang {channel} gain"
+      },
+      "crosspoint_gain": {
+        "name": "Ingang {input} naar uitgang {output} gain"
+      },
+      "input_group_gain": {
+        "name": "Ingangsgroep {group} gain"
+      },
+      "output_group_gain": {
+        "name": "Uitgangsgroep {group} gain"
+      },
+      "crosspoint_group_gain": {
+        "name": "Crosspoint-groep {group} gain"
+      }
+    },
+    "sensor": {
       "unit_name": {
         "name": "Unitnaam"
       },
       "response_time": {
         "name": "Responstijd"
       }
+    },
+    "switch": {
+      "input_mute": {
+        "name": "Ingang {channel} mute"
+      },
+      "output_mute": {
+        "name": "Uitgang {channel} mute"
+      },
+      "crosspoint_mute": {
+        "name": "Ingang {input} naar uitgang {output} mute"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Kanalen en bediening",
+        "description": "Kies welke kanalen en bediening worden aangemaakt. De iDR heeft altijd 16 ingangs- en 16 uitgangskanalen, maar alleen de kanalen die je gebruikt hebben een entiteit nodig.",
+        "data": {
+          "inputs": "Aantal ingangskanalen",
+          "outputs": "Aantal uitgangskanalen",
+          "expose_groups": "Groepsgains",
+          "expose_crosspoints": "Crosspoint-gain en -mute",
+          "scan_interval": "Verversingsinterval"
+        },
+        "data_description": {
+          "inputs": "Ingangskanalen 1 tot dit aantal krijgen een gain- en mute-entiteit.",
+          "outputs": "Uitgangskanalen 1 tot dit aantal krijgen een gain- en mute-entiteit.",
+          "expose_groups": "Maak gain-entiteiten voor de 8 ingangsgroepen, 8 uitgangsgroepen en 16 crosspoint-groepen.",
+          "expose_crosspoints": "Maak een gain- en mute-entiteit voor elke crosspoint (ingangen x uitgangen). Dit kunnen er veel zijn.",
+          "scan_interval": "Hoe vaak de status van de iDR wordt uitgelezen, in seconden."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "De iDR kon niet worden bijgewerkt: {error}"
+    },
+    "not_applied": {
+      "message": "De iDR heeft de waarde {requested} niet overgenomen. Hij meldt {actual}."
     }
   }
 }
