@@ -1,0 +1,65 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Verbinden met een Allen & Heath iDR",
+        "description": "Vul het adres van de netwerkpoort van de iDR in. De unit moet firmware V3.50 of nieuwer hebben, want die is nodig voor het Telnet-besturingsprotocol.",
+        "data": {
+          "host": "IP-adres",
+          "port": "Poort",
+          "password": "Wachtwoord"
+        },
+        "data_description": {
+          "host": "Het IP-adres van de netwerkpoort van de iDR.",
+          "port": "De Telnet-poort van de iDR. Dit is 23, tenzij je die hebt aangepast.",
+          "password": "Alleen nodig als er een wachtwoord op de iDR is ingesteld."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Wachtwoord vereist",
+        "description": "De iDR op {host} vraagt om een wachtwoord. Vul het huidige wachtwoord in.",
+        "data": {
+          "password": "Wachtwoord"
+        }
+      },
+      "reconfigure": {
+        "title": "Verbindingsinstellingen wijzigen",
+        "description": "Wijzig hoe Home Assistant verbinding maakt met de iDR.",
+        "data": {
+          "host": "IP-adres",
+          "port": "Poort",
+          "password": "Wachtwoord"
+        },
+        "data_description": {
+          "host": "Het IP-adres van de netwerkpoort van de iDR.",
+          "port": "De Telnet-poort van de iDR. Dit is 23, tenzij je die hebt aangepast.",
+          "password": "Alleen nodig als er een wachtwoord op de iDR is ingesteld."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Geen verbinding met de iDR. Controleer het IP-adres en de netwerkverbinding.",
+      "invalid_auth": "Het wachtwoord ontbreekt of is onjuist.",
+      "invalid_response": "Het apparaat antwoordde niet als een iDR. Controleer of het firmware V3.50 of nieuwer heeft.",
+      "already_configured": "Er is al een iDR met dit adres en deze poort ingesteld."
+    },
+    "abort": {
+      "already_configured": "Er is al een iDR met dit adres en deze poort ingesteld.",
+      "reauth_successful": "Het wachtwoord is bijgewerkt.",
+      "reconfigure_successful": "De verbindingsinstellingen zijn bijgewerkt."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "preset": {
+        "name": "Preset"
+      },
+      "unit_name": {
+        "name": "Unitnaam"
+      },
+      "response_time": {
+        "name": "Responstijd"
+      }
+    }
+  }
+}

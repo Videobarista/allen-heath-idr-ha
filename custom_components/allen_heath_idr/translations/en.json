@@ -1,0 +1,65 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to an Allen & Heath iDR",
+        "description": "Enter the address of the network port of the iDR. The unit must run firmware V3.50 or later, which is required for the Telnet control protocol.",
+        "data": {
+          "host": "IP address",
+          "port": "Port",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "The IP address of the iDR network port.",
+          "port": "The Telnet port of the iDR. This is 23 unless you changed it.",
+          "password": "Only needed when a password has been set on the iDR."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Password required",
+        "description": "The iDR at {host} requires a password. Enter the current password.",
+        "data": {
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "title": "Change connection settings",
+        "description": "Change how Home Assistant connects to the iDR.",
+        "data": {
+          "host": "IP address",
+          "port": "Port",
+          "password": "Password"
+        },
+        "data_description": {
+          "host": "The IP address of the iDR network port.",
+          "port": "The Telnet port of the iDR. This is 23 unless you changed it.",
+          "password": "Only needed when a password has been set on the iDR."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot connect to the iDR. Check the IP address and the network connection.",
+      "invalid_auth": "The password is missing or wrong.",
+      "invalid_response": "The device did not answer like an iDR. Check that it runs firmware V3.50 or later.",
+      "already_configured": "An iDR with this address and port is already set up."
+    },
+    "abort": {
+      "already_configured": "An iDR with this address and port is already set up.",
+      "reauth_successful": "The password was updated.",
+      "reconfigure_successful": "The connection settings were updated."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "preset": {
+        "name": "Preset"
+      },
+      "unit_name": {
+        "name": "Unit name"
+      },
+      "response_time": {
+        "name": "Response time"
+      }
+    }
+  }
+}
