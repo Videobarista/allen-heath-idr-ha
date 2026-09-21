@@ -1,5 +1,15 @@
 # Allen & Heath iDR for Home Assistant
 
+[![GitHub Release](https://img.shields.io/github/v/release/Videobarista/allen-heath-idr-ha)](https://github.com/Videobarista/allen-heath-idr-ha/releases)
+[![License: MIT](https://img.shields.io/github/license/Videobarista/allen-heath-idr-ha)](LICENSE)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
+
+[![Hassfest](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hassfest.yml/badge.svg)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hassfest.yml)
+[![HACS validation](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hacs.yml/badge.svg)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hacs.yml)
+[![CodeQL](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/codeql.yml/badge.svg)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/codeql.yml)
+[![Ruff](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/ruff.yml/badge.svg)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/ruff.yml)
+
 A custom [Home Assistant](https://www.home-assistant.io/) integration for the
 Allen & Heath **iDR** audio mix processors (iDR-4 and iDR-8). It talks to the
 unit over the network with the Telnet control protocol, fully local and without
