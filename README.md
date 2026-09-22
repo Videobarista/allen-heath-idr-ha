@@ -129,7 +129,7 @@ error.
 
 ### Why a gain and mute per crosspoint, not a single "source" dropdown?
 
-A router like the Blackmagic Videohub sends exactly one source to an output, so
+A routing matrix sends exactly one source to an output, so
 a dropdown per output fully describes its state. The iDR matrix is a real
 **mixer**: several inputs can feed the same output at the same time, each at
 its own level, and the levels sum together. Collapsing that into one dropdown
