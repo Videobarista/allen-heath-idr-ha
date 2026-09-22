@@ -208,6 +208,16 @@ class IdrClient:
         self.model: str | None = None
 
     @property
+    def host(self) -> str:
+        """Return the configured host."""
+        return self._host
+
+    @property
+    def port(self) -> int:
+        """Return the configured port."""
+        return self._port
+
+    @property
     def connected(self) -> bool:
         """Return True when a connection to the iDR is open."""
         return self._writer is not None

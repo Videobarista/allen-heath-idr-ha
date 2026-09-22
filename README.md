@@ -31,6 +31,7 @@ gains, mutes, presets and the full crosspoint matrix.
 | 1.0.0 | First stable release. Adds an Integration version diagnostic entity |
 | 1.1.0 | New `allen_heath_idr.set_crosspoint` service |
 | 1.1.1 | Fixed the service's target: Home Assistant removed device filters from service targets |
+| 1.1.2 | Clearer message when the iDR cannot be reached (no more raw network error text) |
 
 ## Requirements
 
@@ -189,6 +190,14 @@ by automations without adding any entities.
   expose its own firmware version over the Telnet protocol. The Integration
   version diagnostic entity shows the version of this integration instead,
   which is what matters for bug reports.
+- If the iDR is unreachable when Home Assistant starts (or when the
+  integration is added or reloaded), Home Assistant shows **"Failed setup,
+  will retry"** for the entry and keeps retrying on its own schedule. That
+  status text is standard Home Assistant behaviour for any device that is
+  offline at startup and cannot be changed by this integration, but the
+  message below it is: it names the host and port and does not show raw
+  network error details. If the iDR only goes offline *after* a successful
+  start, entities turn "unavailable" instead, without this message.
 
 ## Troubleshooting
 

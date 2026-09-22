@@ -214,8 +214,13 @@ class IdrCoordinator(DataUpdateCoordinator[IdrData]):
             return await self._async_fetch_with_retry()
         except IdrAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
+        except IdrConnectionError as err:
+            raise UpdateFailed(
+                f"Could not reach the iDR at {self.client.host}:{self.client.port}. "
+                "Check that it is switched on and connected to the network."
+            ) from err
         except IdrError as err:
-            raise UpdateFailed(f"Error communicating with the iDR: {err}") from err
+            raise UpdateFailed(f"The iDR reported a problem: {err}") from err
 
     async def _async_fetch_with_retry(self) -> IdrData:
         """Read the current state, retrying a few times on a dropped connection."""
