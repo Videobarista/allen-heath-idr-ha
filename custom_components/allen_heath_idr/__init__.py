@@ -5,8 +5,10 @@ from __future__ import annotations
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.loader import async_get_integration
 
 from .client import IdrClient
+from .const import DOMAIN
 from .coordinator import IdrConfigEntry, IdrCoordinator
 
 PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
@@ -14,12 +16,15 @@ PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
 
 async def async_setup_entry(hass: HomeAssistant, entry: IdrConfigEntry) -> bool:
     """Set up an Allen & Heath iDR from a config entry."""
+    integration = await async_get_integration(hass, DOMAIN)
     client = IdrClient(
         entry.data[CONF_HOST],
         entry.data[CONF_PORT],
         entry.data.get(CONF_PASSWORD),
     )
-    coordinator = IdrCoordinator(hass, entry, client)
+    coordinator = IdrCoordinator(
+        hass, entry, client, str(integration.version or "unknown")
+    )
     try:
         await coordinator.async_config_entry_first_refresh()
     except (ConfigEntryNotReady, ConfigEntryAuthFailed):

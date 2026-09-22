@@ -79,6 +79,9 @@
       },
       "response_time": {
         "name": "Response time"
+      },
+      "integration_version": {
+        "name": "Integration version"
       }
     },
     "switch": {

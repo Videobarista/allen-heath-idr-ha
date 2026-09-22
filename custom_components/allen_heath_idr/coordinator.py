@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import time
@@ -23,6 +24,7 @@ from .client import (
     IdrAuthError,
     IdrClient,
     IdrCommandError,
+    IdrConnectionError,
     IdrError,
     IdrProtocolError,
     MuteType,
@@ -48,6 +50,13 @@ _LOGGER = logging.getLogger(__name__)
 # because the unit works with fixed steps. A bigger difference means that the
 # value was not applied.
 GAIN_TOLERANCE_DB = 3.0
+
+# A single poll can hit a transient network blip (a dropped connection, a busy
+# LAN). Before giving up and marking the iDR unavailable, try reconnecting a
+# few times with a short pause. These are module-level so tests can lower the
+# delay.
+CONNECT_RETRY_ATTEMPTS = 3
+CONNECT_RETRY_DELAY = 1.5  # seconds
 
 type GainKey = tuple[GainType, tuple[int, ...]]
 type MuteKey = tuple[MuteType, tuple[int, ...]]
@@ -141,6 +150,7 @@ class IdrData:
     unit_name: str
     preset: int
     response_time_ms: int
+    integration_version: str
     gains: dict[GainKey, float]
     mutes: dict[MuteKey, bool]
 
@@ -176,7 +186,11 @@ class IdrCoordinator(DataUpdateCoordinator[IdrData]):
     config_entry: IdrConfigEntry
 
     def __init__(
-        self, hass: HomeAssistant, entry: IdrConfigEntry, client: IdrClient
+        self,
+        hass: HomeAssistant,
+        entry: IdrConfigEntry,
+        client: IdrClient,
+        integration_version: str,
     ) -> None:
         """Initialise the coordinator."""
         options = IdrOptions.from_mapping(entry.options)
@@ -188,28 +202,52 @@ class IdrCoordinator(DataUpdateCoordinator[IdrData]):
             update_interval=timedelta(seconds=options.scan_interval),
         )
         self.client = client
+        self.integration_version = integration_version
         self.options = options
         self.gain_keys = options.gain_keys()
         self.mute_keys = options.mute_keys()
         self._unreadable: set[GainKey | MuteKey] = set()
 
     async def _async_update_data(self) -> IdrData:
-        """Read the current state from the iDR."""
+        """Read the current state from the iDR, retrying connection drops."""
         try:
-            started = time.monotonic()
-            preset = await self.client.async_get_preset()
-            response_time_ms = round((time.monotonic() - started) * 1000)
-            unit_name = await self.client.async_get_unit_name()
-            gains = await self._async_read_gains()
-            mutes = await self._async_read_mutes()
+            return await self._async_fetch_with_retry()
         except IdrAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except IdrError as err:
             raise UpdateFailed(f"Error communicating with the iDR: {err}") from err
+
+    async def _async_fetch_with_retry(self) -> IdrData:
+        """Read the current state, retrying a few times on a dropped connection."""
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                return await self._async_fetch()
+            except IdrConnectionError:
+                if attempt >= CONNECT_RETRY_ATTEMPTS:
+                    raise
+                _LOGGER.debug(
+                    "Could not reach the iDR (attempt %s/%s), retrying in %.1fs",
+                    attempt,
+                    CONNECT_RETRY_ATTEMPTS,
+                    CONNECT_RETRY_DELAY,
+                )
+                await asyncio.sleep(CONNECT_RETRY_DELAY)
+
+    async def _async_fetch(self) -> IdrData:
+        """Read the current state from the iDR in one pass."""
+        started = time.monotonic()
+        preset = await self.client.async_get_preset()
+        response_time_ms = round((time.monotonic() - started) * 1000)
+        unit_name = await self.client.async_get_unit_name()
+        gains = await self._async_read_gains()
+        mutes = await self._async_read_mutes()
         return IdrData(
             unit_name=unit_name,
             preset=preset,
             response_time_ms=response_time_ms,
+            integration_version=self.integration_version,
             gains=gains,
             mutes=mutes,
         )

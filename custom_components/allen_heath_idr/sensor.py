@@ -45,6 +45,13 @@ SENSORS: tuple[IdrSensorEntityDescription, ...] = (
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda data: data.response_time_ms,
     ),
+    IdrSensorEntityDescription(
+        key="integration_version",
+        translation_key="integration_version",
+        icon="mdi:package-variant",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.integration_version,
+    ),
 )
 
 

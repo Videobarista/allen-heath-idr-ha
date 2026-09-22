@@ -19,13 +19,16 @@ any cloud.
 
 ## Status
 
-Early development, but usable: the integration reads and controls the audio
-matrix of the iDR.
+Feature-complete for what the iDR Telnet protocol offers: reads and controls
+gains, mutes, presets and the full crosspoint matrix.
 
 | Version | Content |
 | ------- | ------- |
 | 0.1.0 | Connection, config flow, diagnostic sensors |
 | 0.2.0 | Input and output gain and mute, preset recall, optional group gains and crosspoints, options |
+| 0.2.1 | Retries a dropped connection a few times before marking the iDR unavailable |
+| 0.2.2 | Documentation only: clarified the options screen and entity counts |
+| 1.0.0 | First stable release. Adds an Integration version diagnostic entity |
 
 ## Requirements
 
@@ -60,7 +63,13 @@ The address, port and password can be changed later with **Reconfigure**.
 
 ### Options
 
-Open the integration and choose **Configure** to decide what is created:
+The number of channels and whether the routing matrix is exposed are **not**
+asked during setup — they live in a separate options screen that is easy to
+miss:
+
+1. Go to **Settings > Devices & services**.
+2. Find the **Allen & Heath iDR** card and click it (or its three-dot menu).
+3. Choose **Configure**.
 
 | Option | Default | Description |
 | ------ | ------- | ----------- |
@@ -71,8 +80,25 @@ Open the integration and choose **Configure** to decide what is created:
 | Update interval | 10 s | How often the unit is read |
 
 The iDR always has 16 input and 16 output channels in its matrix. Only channels
-that you use need an entity. Crosspoints multiply quickly: 8 x 8 gives 128
-entities, 16 x 16 gives 512.
+that you use need an entity. Submitting the form applies the change immediately
+and reloads the integration.
+
+#### How many entities does this create?
+
+Every channel gets a gain **and** a mute entity, and so does every crosspoint,
+so the numbers add up faster than they might look. A few examples (plus 1
+preset and 2 diagnostic entities in every case):
+
+| Setup | Entities |
+| ----- | -------- |
+| Default (8 in / 8 out, no groups, no crosspoints) | 35 |
+| 8 in / 8 out, with crosspoints | 163 |
+| 16 in / 16 out, with crosspoints | 579 |
+
+Crosspoints are the big multiplier: inputs &times; outputs &times; 2. Leave
+that option off until you are ready to use it, for example to build a
+dashboard for the routing matrix — the per-channel gain and mute entities
+already cover simple level and mute control on their own.
 
 ## Entities
 
@@ -86,6 +112,7 @@ entities, 16 x 16 gives 512.
 | Crosspoint mute (switch, optional) | Mute of an input on an output |
 | Unit name (diagnostic) | Name of the unit as set on the iDR |
 | Response time (diagnostic) | Time the iDR needed to answer a request, in milliseconds |
+| Integration version (diagnostic) | Installed version of this integration, for bug reports |
 
 ### Gain values
 
@@ -99,6 +126,20 @@ After every change the integration reads the value back from the iDR. What you
 see is what the unit reports, so a value that the unit rounds to its own step is
 shown as rounded. When the unit does not apply a value, Home Assistant shows an
 error.
+
+### Why a gain and mute per crosspoint, not a single "source" dropdown?
+
+A router like the Blackmagic Videohub sends exactly one source to an output, so
+a dropdown per output fully describes its state. The iDR matrix is a real
+**mixer**: several inputs can feed the same output at the same time, each at
+its own level, and the levels sum together. Collapsing that into one dropdown
+per output would only work for exclusive routing and would hide the mixing use
+that this hardware is built for (paging over background music, combining
+microphones into one zone, and so on).
+
+The raw entities stay the source of truth for that reason. A dashboard card
+that lays the crosspoints out as a compact grid, instead of a long flat entity
+list, is the planned way to make them practical to use day to day.
 
 ## Good to know
 
@@ -114,6 +155,10 @@ error.
   plain text. Keep the iDR on a trusted network or VLAN.
 - The password handling follows the protocol description of Allen & Heath and has
   not yet been verified on a unit that has a password set.
+- The device page does not show a firmware version, because the iDR does not
+  expose its own firmware version over the Telnet protocol. The Integration
+  version diagnostic entity shows the version of this integration instead,
+  which is what matters for bug reports.
 
 ## Troubleshooting
 
