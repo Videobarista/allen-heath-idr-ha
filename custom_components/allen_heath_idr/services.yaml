@@ -6,7 +6,7 @@ set_crosspoint:
     be given. Works even if the crosspoint entities are not enabled for
     this device.
   target:
-    device:
+    entity:
       integration: allen_heath_idr
   fields:
     input:

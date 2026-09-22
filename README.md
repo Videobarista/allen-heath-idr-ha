@@ -30,6 +30,7 @@ gains, mutes, presets and the full crosspoint matrix.
 | 0.2.2 | Documentation only: clarified the options screen and entity counts |
 | 1.0.0 | First stable release. Adds an Integration version diagnostic entity |
 | 1.1.0 | New `allen_heath_idr.set_crosspoint` service |
+| 1.1.1 | Fixed the service's target: Home Assistant removed device filters from service targets |
 
 ## Requirements
 
@@ -146,8 +147,10 @@ list, is the planned way to make them practical to use day to day.
 
 ### `allen_heath_idr.set_crosspoint`
 
-Set the gain and/or mute of one crosspoint by input and output number,
-targeted at the iDR device:
+Set the gain and/or mute of one crosspoint by input and output number.
+Target the iDR device; Home Assistant no longer supports targeting a service
+by device directly, so under the hood this targets any entity of that
+device, which is the same thing from the picker in the UI:
 
 ```yaml
 action: allen_heath_idr.set_crosspoint

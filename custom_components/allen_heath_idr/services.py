@@ -6,11 +6,11 @@ import math
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.const import CONF_DEVICE_ID
+from homeassistant.const import ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .client import MAX_CHANNELS, OFF_WORDS, GainType, MuteType
 from .const import DOMAIN
@@ -26,8 +26,8 @@ ATTR_MUTE = "mute"
 _CHANNEL_NUMBER = vol.All(vol.Coerce(int), vol.Range(min=1, max=MAX_CHANNELS))
 
 
-def _validate_device_ids(value: Any) -> list[str]:
-    """Accept a single device_id or a list of them, always return a list."""
+def _validate_entity_ids(value: Any) -> list[str]:
+    """Accept a single entity_id or a list of them, always return a list."""
     return [str(item) for item in cv.ensure_list(value)]
 
 
@@ -45,7 +45,7 @@ def _validate_gain(value: Any) -> float:
 
 SET_CROSSPOINT_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_DEVICE_ID): _validate_device_ids,
+        vol.Required(ATTR_ENTITY_ID): _validate_entity_ids,
         vol.Required(ATTR_INPUT): _CHANNEL_NUMBER,
         vol.Required(ATTR_OUTPUT): _CHANNEL_NUMBER,
         vol.Optional(ATTR_GAIN): _validate_gain,
@@ -54,18 +54,23 @@ SET_CROSSPOINT_SCHEMA = vol.Schema(
 )
 
 
-def _async_resolve_coordinator(hass: HomeAssistant, device_id: str) -> IdrCoordinator:
-    """Look up the coordinator behind one targeted device."""
-    device = dr.async_get(hass).async_get(device_id)
-    if device is not None:
-        for entry_id in device.config_entries:
-            entry = hass.config_entries.async_get_entry(entry_id)
-            if entry is not None and entry.domain == DOMAIN:
-                return entry.runtime_data
+def _async_resolve_coordinator(hass: HomeAssistant, entity_id: str) -> IdrCoordinator:
+    """Look up the coordinator behind one targeted entity.
+
+    Any entity of an iDR device resolves to the same coordinator, since they
+    all belong to the same config entry. This indirection (entity instead of
+    device) is required since Home Assistant removed device filters from
+    service targets.
+    """
+    registry_entry = er.async_get(hass).async_get(entity_id)
+    if registry_entry is not None and registry_entry.config_entry_id is not None:
+        entry = hass.config_entries.async_get_entry(registry_entry.config_entry_id)
+        if entry is not None and entry.domain == DOMAIN:
+            return entry.runtime_data
     raise ServiceValidationError(
         translation_domain=DOMAIN,
-        translation_key="device_not_found",
-        translation_placeholders={"device_id": device_id},
+        translation_key="entity_not_found",
+        translation_placeholders={"entity_id": entity_id},
     )
 
 
@@ -85,8 +90,14 @@ def async_register_services(hass: HomeAssistant) -> None:
                 translation_key="crosspoint_needs_gain_or_mute",
             )
         indices = (call.data[ATTR_INPUT], call.data[ATTR_OUTPUT])
-        for device_id in call.data[CONF_DEVICE_ID]:
-            coordinator = _async_resolve_coordinator(hass, device_id)
+        # Targeting a device expands to every one of its entities, so several
+        # entity_ids commonly resolve to the same coordinator; write once per
+        # underlying device.
+        coordinators: dict[int, IdrCoordinator] = {}
+        for entity_id in call.data[ATTR_ENTITY_ID]:
+            coordinator = _async_resolve_coordinator(hass, entity_id)
+            coordinators[id(coordinator)] = coordinator
+        for coordinator in coordinators.values():
             if gain is not None:
                 await coordinator.async_write_gain((GainType.CROSSPOINT, indices), gain)
             if mute is not None:

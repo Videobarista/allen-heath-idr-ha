@@ -125,11 +125,11 @@
     "not_applied": {
       "message": "The iDR did not apply the value {requested}. It reports {actual}."
     },
-    "device_not_found": {
-      "message": "No Allen & Heath iDR device found for {device_id}."
-    },
     "crosspoint_needs_gain_or_mute": {
       "message": "Provide a gain, a mute, or both."
+    },
+    "entity_not_found": {
+      "message": "No Allen & Heath iDR found for entity {entity_id}."
     }
   },
   "services": {
