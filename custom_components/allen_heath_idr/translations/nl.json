@@ -124,6 +124,36 @@
     },
     "not_applied": {
       "message": "De iDR heeft de waarde {requested} niet overgenomen. Hij meldt {actual}."
+    },
+    "device_not_found": {
+      "message": "Geen Allen & Heath iDR-apparaat gevonden voor {device_id}."
+    },
+    "crosspoint_needs_gain_or_mute": {
+      "message": "Geef een gain, een mute, of beide op."
+    }
+  },
+  "services": {
+    "set_crosspoint": {
+      "name": "Crosspoint instellen",
+      "description": "Zet de gain en/of mute van één crosspoint (een ingang naar een uitgang) op de routeringsmatrix van de iDR. Geef minstens gain of mute op. Werkt ook als de crosspoint-entiteiten niet zijn ingeschakeld voor dit apparaat.",
+      "fields": {
+        "input": {
+          "name": "Ingangskanaal",
+          "description": "Het ingangskanaalnummer."
+        },
+        "output": {
+          "name": "Uitgangskanaal",
+          "description": "Het uitgangskanaalnummer."
+        },
+        "gain": {
+          "name": "Gain",
+          "description": "De gain in dB, of \"off\" om de crosspoint volledig uit te schakelen (-infinity)."
+        },
+        "mute": {
+          "name": "Mute",
+          "description": "Mute of unmute de crosspoint."
+        }
+      }
     }
   }
 }

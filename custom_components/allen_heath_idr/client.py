@@ -48,7 +48,7 @@ _ERROR_MARKERS: Final = (
     "illegal",
     "unknown",
 )
-_OFF_WORDS: Final = frozenset({"-inf", "off", "-infinity"})
+OFF_WORDS: Final = frozenset({"-inf", "off", "-infinity"})
 
 
 class IdrError(Exception):
@@ -129,7 +129,7 @@ def parse_gain(reply: str) -> float:
     text = reply.strip().lower()
     if text.endswith("db"):
         text = text[:-2].strip()
-    if text in _OFF_WORDS:
+    if text in OFF_WORDS:
         return -math.inf
     try:
         value = float(text)

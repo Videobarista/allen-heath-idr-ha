@@ -1,0 +1,41 @@
+set_crosspoint:
+  name: Set crosspoint
+  description: >-
+    Set the gain and/or mute of one crosspoint (an input routed to an
+    output) on the iDR's routing matrix. At least one of gain or mute must
+    be given. Works even if the crosspoint entities are not enabled for
+    this device.
+  target:
+    device:
+      integration: allen_heath_idr
+  fields:
+    input:
+      name: Input channel
+      description: The input channel number.
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 16
+          mode: box
+    output:
+      name: Output channel
+      description: The output channel number.
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 16
+          mode: box
+    gain:
+      name: Gain
+      description: >-
+        The gain in dB, or "off" to switch the crosspoint off completely
+        (-infinity).
+      selector:
+        text:
+    mute:
+      name: Mute
+      description: Mute or unmute the crosspoint.
+      selector:
+        boolean:

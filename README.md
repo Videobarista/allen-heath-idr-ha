@@ -29,6 +29,7 @@ gains, mutes, presets and the full crosspoint matrix.
 | 0.2.1 | Retries a dropped connection a few times before marking the iDR unavailable |
 | 0.2.2 | Documentation only: clarified the options screen and entity counts |
 | 1.0.0 | First stable release. Adds an Integration version diagnostic entity |
+| 1.1.0 | New `allen_heath_idr.set_crosspoint` service |
 
 ## Requirements
 
@@ -129,8 +130,8 @@ error.
 
 ### Why a gain and mute per crosspoint, not a single "source" dropdown?
 
-A routing matrix sends exactly one source to an output, so
-a dropdown per output fully describes its state. The iDR matrix is a real
+A routing matrix that only ever sends one source to an output would be fully
+described by a dropdown per output. The iDR matrix is a real
 **mixer**: several inputs can feed the same output at the same time, each at
 its own level, and the levels sum together. Collapsing that into one dropdown
 per output would only work for exclusive routing and would hide the mixing use
@@ -140,6 +141,32 @@ microphones into one zone, and so on).
 The raw entities stay the source of truth for that reason. A dashboard card
 that lays the crosspoints out as a compact grid, instead of a long flat entity
 list, is the planned way to make them practical to use day to day.
+
+## Services
+
+### `allen_heath_idr.set_crosspoint`
+
+Set the gain and/or mute of one crosspoint by input and output number,
+targeted at the iDR device:
+
+```yaml
+action: allen_heath_idr.set_crosspoint
+target:
+  device_id: <the iDR device>
+data:
+  input: 2
+  output: 5
+  gain: -6.5   # a number in dB, or "off" for -infinity
+  mute: false  # optional; give gain, mute, or both
+```
+
+This is meant for automations, scripts, and the future dashboard card: `input`
+and `output` are always plain channel numbers, so callers do not need to know
+how Home Assistant slugged the entity for that specific crosspoint. Setting
+gain and mute together also happens as one action instead of two separate
+calls. The service writes directly to the iDR and works even when the
+crosspoint entities are not enabled for this device, so it can be used purely
+by automations without adding any entities.
 
 ## Good to know
 

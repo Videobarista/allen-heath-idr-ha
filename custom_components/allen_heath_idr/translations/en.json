@@ -124,6 +124,36 @@
     },
     "not_applied": {
       "message": "The iDR did not apply the value {requested}. It reports {actual}."
+    },
+    "device_not_found": {
+      "message": "No Allen & Heath iDR device found for {device_id}."
+    },
+    "crosspoint_needs_gain_or_mute": {
+      "message": "Provide a gain, a mute, or both."
+    }
+  },
+  "services": {
+    "set_crosspoint": {
+      "name": "Set crosspoint",
+      "description": "Set the gain and/or mute of one crosspoint (an input routed to an output) on the iDR's routing matrix. At least one of gain or mute must be given. Works even if the crosspoint entities are not enabled for this device.",
+      "fields": {
+        "input": {
+          "name": "Input channel",
+          "description": "The input channel number."
+        },
+        "output": {
+          "name": "Output channel",
+          "description": "The output channel number."
+        },
+        "gain": {
+          "name": "Gain",
+          "description": "The gain in dB, or \"off\" to switch the crosspoint off completely (-infinity)."
+        },
+        "mute": {
+          "name": "Mute",
+          "description": "Mute or unmute the crosspoint."
+        }
+      }
     }
   }
 }
