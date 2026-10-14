@@ -24,6 +24,8 @@ are trademarks of their respective owner.
 
 | Version | Notes |
 |---|---|
+| 1.3.0 | Clearer device page: "Active preset" at the top, crosspoints moved to the Configuration section; entities left behind by older versions (or by lowering channel counts in the options) are cleaned up automatically; restored the "Unit name" diagnostic sensor. |
+| 1.2.1 | A switched-off iDR no longer writes an error to the Home Assistant log: going offline and coming back are logged once each, at info level. |
 | 1.2.0 | Setup no longer fails when the iDR is switched off at startup (it's assumed to simply be offline and polling keeps retrying); aligned the integration with the Home Assistant quality scale Bronze tier (tests, `quality_scale.yaml`). |
 | 1.1.2 | Friendlier, specific error message when the iDR can't be reached. |
 | 1.1.1 | Fixed `set_crosspoint` after a Home Assistant breaking change removed device filters from service targets; the service now targets entities (a device pick still works, HA expands it automatically). |
@@ -86,19 +88,28 @@ what it takes to control a true mixing matrix (see below). Some examples:
 
 | Inputs × outputs | Groups | Crosspoints | Entities |
 |---|---|---|---|
-| 8 × 8 | off | off | 35 (the default) |
-| 8 × 8 | on | on | 179 |
-| 16 × 16 | off | off | 67 |
-| 16 × 16 | on | on | 595 |
+| 8 × 8 | off | off | 36 (the default) |
+| 8 × 8 | on | on | 180 |
+| 16 × 16 | off | off | 68 |
+| 16 × 16 | on | on | 596 |
 
 If you only need to script one or two crosspoints, the `set_crosspoint`
 service (below) does that without turning this option on at all.
 
 ## Entities
 
-- **Number**: preset recall, one gain per input/output/group/crosspoint channel exposed.
-- **Switch**: one mute per input/output/crosspoint channel exposed.
-- **Sensor** (diagnostic): response time, integration version.
+On the device page they're grouped like this (Home Assistant always sorts
+alphabetically within each section):
+
+- **Controls**: Active preset, then per input its gain and mute, the
+  input/output groups (if enabled), then per output its gain and mute.
+- **Configuration**: the crosspoints (if enabled) — one gain and one mute per
+  input/output pair. They live here so the main controls stay short and easy
+  to find; they work exactly the same.
+- **Diagnostic**: unit name, response time, integration version.
+
+When you lower the channel counts or switch crosspoints/groups off in the
+options, the entities that are no longer needed are removed automatically.
 
 ### Gain values
 
@@ -153,6 +164,9 @@ normal state, not a setup failure:
 - Polling keeps retrying in the background on the normal interval, and
   everything comes back automatically once the unit powers back on — no
   reload needed.
+- Nothing is logged as an error. Going offline and coming back are each
+  logged once, at info level; genuine protocol problems (a unit that
+  answers with something unexpected) are still logged as errors.
 
 The one exception is the very first time you add the integration: the setup
 wizard does need to reach the iDR once, to read its name and model.

@@ -29,6 +29,12 @@ class IdrSensorEntityDescription(SensorEntityDescription):
 
 SENSOR_DESCRIPTIONS: tuple[IdrSensorEntityDescription, ...] = (
     IdrSensorEntityDescription(
+        key="unit_name",
+        translation_key="unit_name",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda data: data.unit_name,
+    ),
+    IdrSensorEntityDescription(
         key="response_time",
         translation_key="response_time",
         entity_category=EntityCategory.DIAGNOSTIC,

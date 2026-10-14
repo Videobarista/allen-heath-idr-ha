@@ -6,6 +6,7 @@ import math
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -84,6 +85,10 @@ class IdrGainNumber(IdrEntity, NumberEntity):
         self._attr_native_max_value = upper
         self._attr_translation_key = _TRANSLATION_KEYS[key.gain_type]
         self._attr_translation_placeholders = _placeholders(key)
+        if key.gain_type is GainType.CROSSPOINT:
+            # Keeps the (many) crosspoints out of the main Controls list on the
+            # device page, so presets, inputs and outputs stay easy to find.
+            self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def available(self) -> bool:

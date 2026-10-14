@@ -153,6 +153,8 @@ class IdrData:
     integration_version: str
     gains: dict[GainKey, float] = field(default_factory=dict)
     mutes: dict[MuteKey, bool] = field(default_factory=dict)
+    #: False while the iDR can't be reached (e.g. switched off at the wall).
+    online: bool = True
 
 
 def _gain_matches(confirmed: float, requested: float) -> bool:
@@ -164,11 +166,12 @@ def _gain_matches(confirmed: float, requested: float) -> bool:
 class IdrCoordinator(DataUpdateCoordinator[IdrData]):
     """Polls an iDR unit on a fixed interval and serves cached data to entities.
 
-    Setup never blocks on the device being reachable: a config entry is set up
-    successfully even if the iDR is switched off at the time, and polling just
-    keeps retrying in the background on its normal schedule. ``data`` stays
-    ``None`` until the first successful poll, and entities are expected to
-    report themselves unavailable while that is the case (see ``entity.py``).
+    A switched-off iDR is a normal state, not an error. When it can't be
+    reached, a poll still "succeeds" and returns data with ``online=False``,
+    so entities go unavailable (see ``entity.py``) without Home Assistant
+    logging an error on every outage. Only the transitions are logged, at
+    info level, and polling simply keeps retrying on its normal schedule.
+    Genuine protocol errors still fail the poll and are logged as errors.
     """
 
     def __init__(
@@ -190,31 +193,62 @@ class IdrCoordinator(DataUpdateCoordinator[IdrData]):
             update_interval=timedelta(seconds=self.options.scan_interval),
         )
 
+    @property
+    def is_offline(self) -> bool:
+        """Return whether the last poll found the iDR unreachable."""
+        return self.data is not None and not self.data.online
+
     async def _async_update_data(self) -> IdrData:
         try:
-            return await self._async_fetch_with_retry()
+            data = await self._async_fetch_with_retry()
         except IdrAuthError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except IdrConnectionError as err:
-            raise UpdateFailed(
-                f"Could not reach the iDR at {self.client.host}:{self.client.port}. "
-                "Check that it is switched on and connected to the network."
-            ) from err
+            return self._offline_data(err)
         except IdrError as err:
             raise UpdateFailed(f"The iDR reported a problem: {err}") from err
 
+        if self.is_offline:
+            _LOGGER.info("The iDR at %s:%s is back online", self.client.host, self.client.port)
+        return data
+
+    def _offline_data(self, err: IdrConnectionError) -> IdrData:
+        """Return an "offline" poll result, logging only the transition to offline."""
+        if not self.is_offline:
+            _LOGGER.info(
+                "The iDR at %s:%s can't be reached (switched off?); its entities are "
+                "unavailable until it responds again, retrying every %ss",
+                self.client.host,
+                self.client.port,
+                self.options.scan_interval,
+            )
+        _LOGGER.debug("iDR poll failed: %s", err)
+        unit_name = self.data.unit_name if self.data is not None else self.config_entry.title
+        return IdrData(
+            unit_name=unit_name,
+            preset=None,
+            response_time_ms=0.0,
+            integration_version=self._integration_version,
+            online=False,
+        )
+
     async def _async_fetch_with_retry(self) -> IdrData:
-        """Fetch a full poll, retrying a few times on a connection failure."""
-        for attempt in range(1, CONNECT_RETRY_ATTEMPTS + 1):
+        """Fetch a full poll, retrying a few times on a connection failure.
+
+        Once the iDR is known to be offline there's no point retrying within a
+        poll; a single attempt per poll interval is enough to notice it's back.
+        """
+        attempts = 1 if self.is_offline else CONNECT_RETRY_ATTEMPTS
+        for attempt in range(1, attempts + 1):
             try:
                 return await self._async_fetch()
             except IdrConnectionError as err:
-                if attempt == CONNECT_RETRY_ATTEMPTS:
+                if attempt == attempts:
                     raise
                 _LOGGER.debug(
                     "Poll attempt %s/%s failed, retrying in %.1fs: %s",
                     attempt,
-                    CONNECT_RETRY_ATTEMPTS,
+                    attempts,
                     CONNECT_RETRY_DELAY,
                     err,
                 )

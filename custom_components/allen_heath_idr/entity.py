@@ -42,9 +42,9 @@ class IdrEntity(CoordinatorEntity[IdrCoordinator]):
     def available(self) -> bool:
         """Return whether this entity's reading is currently available.
 
-        Only true once the coordinator has completed at least one
-        successful poll. Before that, or whenever the device drops
-        offline again later, the entity reports unavailable rather than
-        the whole config entry failing to set up.
+        False while the iDR is unreachable (e.g. switched off at the wall),
+        so the entity reports unavailable rather than the whole config entry
+        failing to set up.
         """
-        return super().available and self.coordinator.data is not None
+        data = self.coordinator.data
+        return super().available and data is not None and data.online

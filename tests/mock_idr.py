@@ -36,9 +36,13 @@ class MockIdr:
         self._server: asyncio.base_events.Server | None = None
         self._writers: set[asyncio.StreamWriter] = set()
 
-    async def start(self) -> None:
-        """Start listening on an ephemeral local port."""
-        self._server = await asyncio.start_server(self._handle, self.host, 0)
+    async def start(self, port: int = 0) -> None:
+        """Start listening, on an ephemeral local port unless one is given.
+
+        Passing the previous port lets a test "switch the device back on" at
+        the same address the integration is configured for.
+        """
+        self._server = await asyncio.start_server(self._handle, self.host, port)
         self.port = self._server.sockets[0].getsockname()[1]
 
     async def stop(self) -> None:

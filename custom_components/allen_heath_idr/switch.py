@@ -6,6 +6,7 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -43,6 +44,9 @@ class IdrMuteSwitch(IdrEntity, SwitchEntity):
         self._key = key
         self._attr_translation_key = _TRANSLATION_KEYS[key.mute_type]
         self._attr_translation_placeholders = _placeholders(key)
+        if key.mute_type is MuteType.CROSSPOINT:
+            # See number.py: crosspoints live in the Configuration section.
+            self._attr_entity_category = EntityCategory.CONFIG
 
     @property
     def available(self) -> bool:

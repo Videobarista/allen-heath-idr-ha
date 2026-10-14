@@ -69,7 +69,7 @@
   "entity": {
     "number": {
       "preset": {
-        "name": "Preset"
+        "name": "Actieve preset"
       },
       "input_gain": {
         "name": "Ingang {channel} gain"
@@ -96,6 +96,9 @@
       },
       "integration_version": {
         "name": "Integratieversie"
+      },
+      "unit_name": {
+        "name": "Apparaatnaam"
       }
     },
     "switch": {
