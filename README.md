@@ -3,13 +3,14 @@
 [![Release](https://img.shields.io/github/v/release/Videobarista/allen-heath-idr-ha)](https://github.com/Videobarista/allen-heath-idr-ha/releases)
 [![License](https://img.shields.io/github/license/Videobarista/allen-heath-idr-ha)](LICENSE)
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Open your Home Assistant instance and open this repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Videobarista&repository=allen-heath-idr-ha&category=integration)
 [![Works with Home Assistant 2025.1+](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5)](https://www.home-assistant.io)
 [![Ruff](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/ruff.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/ruff.yml)
 [![Hassfest](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hassfest.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hassfest.yml)
 [![HACS Validate](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hacs.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hacs.yml)
 [![CodeQL](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/codeql.yml)
 [![Tests](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/tests.yml)
+
+[![Open your Home Assistant instance and open this repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Videobarista&repository=allen-heath-idr-ha&category=integration)
 
 A local-polling Home Assistant integration for the Allen & Heath iDR-4 / iDR-8
 audio mix processor, controlled over its Telnet protocol (TCP port 23). No
