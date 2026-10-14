@@ -34,6 +34,7 @@ class MockIdr:
         self.host = "127.0.0.1"
         self.port = 0
         self._server: asyncio.base_events.Server | None = None
+        self._writers: set[asyncio.StreamWriter] = set()
 
     async def start(self) -> None:
         """Start listening on an ephemeral local port."""
@@ -41,12 +42,31 @@ class MockIdr:
         self.port = self._server.sockets[0].getsockname()[1]
 
     async def stop(self) -> None:
-        """Stop listening and drop any open connection."""
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
+        """Stop listening and drop any open connection.
+
+        Open client connections are closed explicitly first: since Python 3.12,
+        ``wait_closed()`` waits for every connection to finish, so it would hang
+        forever while Home Assistant still holds its connection to the "device".
+        """
+        if self._server is None:
+            return
+        self._server.close()
+        for writer in list(self._writers):
+            writer.close()
+        await self._server.wait_closed()
+        self._server = None
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        self._writers.add(writer)
+        try:
+            await self._serve(reader, writer)
+        except (ConnectionError, asyncio.IncompleteReadError):
+            pass
+        finally:
+            self._writers.discard(writer)
+            writer.close()
+
+    async def _serve(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         self.connection_count += 1
         if self.drop_next_connection:
             self.drop_next_connection = False
