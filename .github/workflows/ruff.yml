@@ -2,16 +2,25 @@ name: Ruff
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   ruff:
-    name: Ruff
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/ruff-action@v4.1.0
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Format check
+        run: ruff format --check .
