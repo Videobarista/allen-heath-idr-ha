@@ -3,16 +3,11 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import (
-    ConfigEntry,
-    ConfigFlow,
-    ConfigFlowResult,
-    OptionsFlow,
-)
+
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
@@ -25,26 +20,23 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
-from .client import (
-    MAX_CHANNELS,
-    IdrAuthError,
-    IdrClient,
-    IdrConnectionError,
-    IdrError,
-    IdrIdentity,
-)
+from .client import IdrAuthError, IdrClient, IdrConnectionError, IdrError, IdrIdentity
 from .const import (
     CONF_CROSSPOINTS,
     CONF_GROUPS,
     CONF_INPUTS,
     CONF_OUTPUTS,
     CONF_SCAN_INTERVAL,
+    DEFAULT_INPUTS,
+    DEFAULT_OUTPUTS,
     DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MAX_CHANNELS,
     MAX_SCAN_INTERVAL,
+    MIN_CHANNELS,
     MIN_SCAN_INTERVAL,
 )
-from .coordinator import IdrOptions
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,9 +45,7 @@ PASSWORD_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWO
 USER_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
-        vol.Required(CONF_PORT, default=DEFAULT_PORT): vol.All(
-            vol.Coerce(int), vol.Range(min=1, max=65535)
-        ),
+        vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
         vol.Optional(CONF_PASSWORD): PASSWORD_SELECTOR,
     }
 )
@@ -64,7 +54,7 @@ REAUTH_SCHEMA = vol.Schema({vol.Required(CONF_PASSWORD): PASSWORD_SELECTOR})
 
 
 async def _async_validate(host: str, port: int, password: str | None) -> IdrIdentity:
-    """Connect to the iDR and read its identity."""
+    """Connect to an iDR and return its identity, letting IdrError propagate."""
     client = IdrClient(host, port, password)
     try:
         return await client.async_get_identity()
@@ -73,7 +63,7 @@ async def _async_validate(host: str, port: int, password: str | None) -> IdrIden
 
 
 def _error_key(err: IdrError) -> str:
-    """Translate a client error into a form error key."""
+    """Map a client error to a config flow error/abort key."""
     if isinstance(err, IdrAuthError):
         return "invalid_auth"
     if isinstance(err, IdrConnectionError):
@@ -82,156 +72,133 @@ def _error_key(err: IdrError) -> str:
 
 
 class IdrConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle the config flow for an Allen & Heath iDR."""
+    """Handle a config flow for the Allen & Heath iDR integration."""
 
     VERSION = 1
 
-    @staticmethod
-    @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        """Return the options flow."""
-        return IdrOptionsFlow()
-
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Ask for the connection details."""
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle the initial step."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            host = user_input[CONF_HOST].strip()
-            port = user_input[CONF_PORT]
-            password = user_input.get(CONF_PASSWORD) or None
+            host = user_input[CONF_HOST]
+            port = user_input.get(CONF_PORT, DEFAULT_PORT)
+            password = user_input.get(CONF_PASSWORD)
+
             self._async_abort_entries_match({CONF_HOST: host, CONF_PORT: port})
+
             try:
                 identity = await _async_validate(host, port, password)
             except IdrError as err:
-                _LOGGER.debug("Could not set up %s:%s: %r", host, port, err)
                 errors["base"] = _error_key(err)
             else:
-                data: dict[str, Any] = {CONF_HOST: host, CONF_PORT: port}
-                if password:
-                    data[CONF_PASSWORD] = password
                 return self.async_create_entry(
-                    title=identity.unit_name or host, data=data
+                    title=identity.unit_name or host,
+                    data={CONF_HOST: host, CONF_PORT: port, CONF_PASSWORD: password},
                 )
-        return self.async_show_form(
-            step_id="user",
-            data_schema=self.add_suggested_values_to_schema(USER_SCHEMA, user_input),
-            errors=errors,
-        )
 
-    async def async_step_reauth(
-        self, entry_data: Mapping[str, Any]
-    ) -> ConfigFlowResult:
-        """Start the flow when the stored password no longer works."""
+        return self.async_show_form(step_id="user", data_schema=USER_SCHEMA, errors=errors)
+
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+        """Handle a reauth flow triggered by a rejected password."""
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Ask for a new password."""
-        entry = self._get_reauth_entry()
+        """Ask for a new password and verify it before updating the entry."""
         errors: dict[str, str] = {}
+        reauth_entry = self._get_reauth_entry()
         if user_input is not None:
+            host = reauth_entry.data[CONF_HOST]
+            port = reauth_entry.data.get(CONF_PORT, DEFAULT_PORT)
             password = user_input[CONF_PASSWORD]
             try:
-                await _async_validate(
-                    entry.data[CONF_HOST], entry.data[CONF_PORT], password
-                )
+                await _async_validate(host, port, password)
             except IdrError as err:
-                _LOGGER.debug("Reauthentication failed: %r", err)
                 errors["base"] = _error_key(err)
             else:
                 return self.async_update_reload_and_abort(
-                    entry, data_updates={CONF_PASSWORD: password}
+                    reauth_entry, data={**reauth_entry.data, CONF_PASSWORD: password}
                 )
+
         return self.async_show_form(
-            step_id="reauth_confirm",
-            data_schema=REAUTH_SCHEMA,
-            description_placeholders={"host": entry.data[CONF_HOST]},
-            errors=errors,
+            step_id="reauth_confirm", data_schema=REAUTH_SCHEMA, errors=errors
         )
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Change the address, port or password of an existing entry."""
-        entry = self._get_reconfigure_entry()
+        """Allow changing the host, port or password of an existing entry."""
         errors: dict[str, str] = {}
+        reconfigure_entry = self._get_reconfigure_entry()
         if user_input is not None:
-            host = user_input[CONF_HOST].strip()
-            port = user_input[CONF_PORT]
-            password = user_input.get(CONF_PASSWORD) or None
-            duplicate = any(
-                other.entry_id != entry.entry_id
-                and other.data[CONF_HOST] == host
-                and other.data[CONF_PORT] == port
-                for other in self._async_current_entries()
-            )
-            if duplicate:
-                errors["base"] = "already_configured"
+            host = user_input[CONF_HOST]
+            port = user_input.get(CONF_PORT, DEFAULT_PORT)
+            password = user_input.get(CONF_PASSWORD)
+            try:
+                identity = await _async_validate(host, port, password)
+            except IdrError as err:
+                errors["base"] = _error_key(err)
             else:
-                try:
-                    await _async_validate(host, port, password)
-                except IdrError as err:
-                    _LOGGER.debug("Could not reconfigure %s:%s: %r", host, port, err)
-                    errors["base"] = _error_key(err)
-                else:
-                    data: dict[str, Any] = {CONF_HOST: host, CONF_PORT: port}
-                    if password:
-                        data[CONF_PASSWORD] = password
-                    return self.async_update_reload_and_abort(entry, data=data)
+                return self.async_update_reload_and_abort(
+                    reconfigure_entry,
+                    title=identity.unit_name or host,
+                    data={CONF_HOST: host, CONF_PORT: port, CONF_PASSWORD: password},
+                    reason="reconfigure_successful",
+                )
+
+        suggested = {**reconfigure_entry.data}
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=self.add_suggested_values_to_schema(
-                USER_SCHEMA, user_input or entry.data
-            ),
+            data_schema=self.add_suggested_values_to_schema(USER_SCHEMA, suggested),
             errors=errors,
         )
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> IdrOptionsFlow:
+        """Return the options flow for this integration."""
+        return IdrOptionsFlow()
+
 
 class IdrOptionsFlow(OptionsFlow):
-    """Handle the options of an Allen & Heath iDR."""
+    """Handle options: channel counts, groups/crosspoints, and the poll interval."""
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Ask which channels and controls to expose."""
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Manage the options."""
         if user_input is not None:
-            return self.async_create_entry(
-                data={
-                    CONF_INPUTS: int(user_input[CONF_INPUTS]),
-                    CONF_OUTPUTS: int(user_input[CONF_OUTPUTS]),
-                    CONF_GROUPS: bool(user_input[CONF_GROUPS]),
-                    CONF_CROSSPOINTS: bool(user_input[CONF_CROSSPOINTS]),
-                    CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
-                }
-            )
-        current = IdrOptions.from_mapping(self.config_entry.options)
-        channels = NumberSelector(
-            NumberSelectorConfig(
-                min=1, max=MAX_CHANNELS, step=1, mode=NumberSelectorMode.BOX
-            )
-        )
-        interval = NumberSelector(
-            NumberSelectorConfig(
-                min=MIN_SCAN_INTERVAL,
-                max=MAX_SCAN_INTERVAL,
-                step=1,
-                mode=NumberSelectorMode.BOX,
-                unit_of_measurement="s",
-            )
-        )
+            return self.async_create_entry(data=user_input)
+
+        current = self.config_entry.options
         schema = vol.Schema(
             {
-                vol.Required(CONF_INPUTS, default=current.inputs): channels,
-                vol.Required(CONF_OUTPUTS, default=current.outputs): channels,
-                vol.Required(CONF_GROUPS, default=current.groups): BooleanSelector(),
-                vol.Required(
-                    CONF_CROSSPOINTS, default=current.crosspoints
+                vol.Optional(
+                    CONF_INPUTS, default=current.get(CONF_INPUTS, DEFAULT_INPUTS)
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MIN_CHANNELS, max=MAX_CHANNELS, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_OUTPUTS, default=current.get(CONF_OUTPUTS, DEFAULT_OUTPUTS)
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MIN_CHANNELS, max=MAX_CHANNELS, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(
+                    CONF_GROUPS, default=current.get(CONF_GROUPS, False)
                 ): BooleanSelector(),
-                vol.Required(CONF_SCAN_INTERVAL, default=current.scan_interval): (
-                    interval
+                vol.Optional(
+                    CONF_CROSSPOINTS, default=current.get(CONF_CROSSPOINTS, False)
+                ): BooleanSelector(),
+                vol.Optional(
+                    CONF_SCAN_INTERVAL,
+                    default=current.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX
+                    )
                 ),
             }
         )

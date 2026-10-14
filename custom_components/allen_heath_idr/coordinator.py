@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import timedelta
 import logging
 import math
 import time
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
-from datetime import timedelta
-from typing import Any
+from typing import Any, NamedTuple
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -17,18 +17,12 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .client import (
-    MAX_CHANNELS,
-    MAX_CROSSPOINT_GROUPS,
-    MAX_IO_GROUPS,
     GainType,
     IdrAuthError,
     IdrClient,
-    IdrCommandError,
     IdrConnectionError,
     IdrError,
-    IdrProtocolError,
     MuteType,
-    format_gain,
 )
 from .const import (
     CONF_CROSSPOINTS,
@@ -40,37 +34,62 @@ from .const import (
     DEFAULT_OUTPUTS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    MAX_CHANNELS,
     MAX_SCAN_INTERVAL,
+    MIN_CHANNELS,
     MIN_SCAN_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-# A gain read back from the iDR may differ a little from the requested value
-# because the unit works with fixed steps. A bigger difference means that the
-# value was not applied.
+#: Input/output group numbers the protocol supports (fixed, not user-configurable).
+GROUP_COUNT = 8
+
+#: Allowed drift between a value we just wrote and the one read back to confirm it.
+#: The iDR can ramp a gain change over a short time rather than jump instantly, so
+#: an immediate read-back is not always bit-for-bit identical to what was sent.
 GAIN_TOLERANCE_DB = 3.0
 
-# A single poll can hit a transient network blip (a dropped connection, a busy
-# LAN). Before giving up and marking the iDR unavailable, try reconnecting a
-# few times with a short pause. These are module-level so tests can lower the
-# delay.
+#: How many times to retry connecting within a single poll before giving up. This
+#: smooths over brief network hiccups so a single dropped packet doesn't flip every
+#: entity to unavailable. Module-level so tests can shrink them.
 CONNECT_RETRY_ATTEMPTS = 3
-CONNECT_RETRY_DELAY = 1.5  # seconds
-
-type GainKey = tuple[GainType, tuple[int, ...]]
-type MuteKey = tuple[MuteType, tuple[int, ...]]
-type IdrConfigEntry = ConfigEntry[IdrCoordinator]
+CONNECT_RETRY_DELAY = 1.5
 
 
-def _clamp(value: int, lower: int, upper: int) -> int:
-    """Keep a value inside a range."""
-    return max(lower, min(upper, value))
+class GainKey(NamedTuple):
+    """Identifies a single gain reading/control."""
+
+    gain_type: GainType
+    channels: tuple[int, ...]
+
+    @property
+    def unique_suffix(self) -> str:
+        """Return a stable suffix for unique_id / translation placeholders."""
+        parts = "_".join(str(channel) for channel in self.channels)
+        return f"{self.gain_type.value.lower()}_{parts}"
+
+
+class MuteKey(NamedTuple):
+    """Identifies a single mute reading/control."""
+
+    mute_type: MuteType
+    channels: tuple[int, ...]
+
+    @property
+    def unique_suffix(self) -> str:
+        """Return a stable suffix for unique_id / translation placeholders."""
+        parts = "_".join(str(channel) for channel in self.channels)
+        return f"{self.mute_type.value.lower()}_{parts}"
+
+
+def _clamp(value: int, minimum: int, maximum: int) -> int:
+    return max(minimum, min(maximum, value))
 
 
 @dataclass(frozen=True)
 class IdrOptions:
-    """The options of a config entry, with defaults and safe limits."""
+    """Resolved, clamped configuration options for a config entry."""
 
     inputs: int = DEFAULT_INPUTS
     outputs: int = DEFAULT_OUTPUTS
@@ -79,137 +98,99 @@ class IdrOptions:
     scan_interval: int = DEFAULT_SCAN_INTERVAL
 
     @classmethod
-    def from_mapping(cls, options: Mapping[str, Any]) -> IdrOptions:
-        """Build the options from the stored options of a config entry."""
+    def from_mapping(cls, data: Mapping[str, Any]) -> IdrOptions:
+        """Build options from a merged config/options entry mapping, clamping values."""
+        inputs = _clamp(int(data.get(CONF_INPUTS, DEFAULT_INPUTS)), MIN_CHANNELS, MAX_CHANNELS)
+        outputs = _clamp(int(data.get(CONF_OUTPUTS, DEFAULT_OUTPUTS)), MIN_CHANNELS, MAX_CHANNELS)
+        scan_interval = _clamp(
+            int(data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)),
+            MIN_SCAN_INTERVAL,
+            MAX_SCAN_INTERVAL,
+        )
         return cls(
-            inputs=_clamp(
-                int(options.get(CONF_INPUTS, DEFAULT_INPUTS)), 1, MAX_CHANNELS
-            ),
-            outputs=_clamp(
-                int(options.get(CONF_OUTPUTS, DEFAULT_OUTPUTS)), 1, MAX_CHANNELS
-            ),
-            groups=bool(options.get(CONF_GROUPS, False)),
-            crosspoints=bool(options.get(CONF_CROSSPOINTS, False)),
-            scan_interval=_clamp(
-                int(options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)),
-                MIN_SCAN_INTERVAL,
-                MAX_SCAN_INTERVAL,
-            ),
+            inputs=inputs,
+            outputs=outputs,
+            groups=bool(data.get(CONF_GROUPS, False)),
+            crosspoints=bool(data.get(CONF_CROSSPOINTS, False)),
+            scan_interval=scan_interval,
         )
 
     def gain_keys(self) -> list[GainKey]:
-        """Return all gains that are exposed."""
-        keys: list[GainKey] = [
-            (GainType.INPUT, (number,)) for number in range(1, self.inputs + 1)
-        ]
-        keys.extend(
-            (GainType.OUTPUT, (number,)) for number in range(1, self.outputs + 1)
-        )
+        """Return every gain reading this configuration should poll/expose."""
+        keys = [GainKey(GainType.INPUT, (ch,)) for ch in range(1, self.inputs + 1)]
+        keys += [GainKey(GainType.OUTPUT, (ch,)) for ch in range(1, self.outputs + 1)]
         if self.groups:
-            keys.extend(
-                (GainType.INPUT_GROUP, (number,))
-                for number in range(1, MAX_IO_GROUPS + 1)
-            )
-            keys.extend(
-                (GainType.OUTPUT_GROUP, (number,))
-                for number in range(1, MAX_IO_GROUPS + 1)
-            )
-            keys.extend(
-                (GainType.CROSSPOINT_GROUP, (number,))
-                for number in range(1, MAX_CROSSPOINT_GROUPS + 1)
-            )
+            keys += [GainKey(GainType.INPUT_GROUP, (g,)) for g in range(1, GROUP_COUNT + 1)]
+            keys += [GainKey(GainType.OUTPUT_GROUP, (g,)) for g in range(1, GROUP_COUNT + 1)]
         if self.crosspoints:
-            keys.extend(
-                (GainType.CROSSPOINT, (source, target))
-                for source in range(1, self.inputs + 1)
-                for target in range(1, self.outputs + 1)
-            )
+            keys += [
+                GainKey(GainType.CROSSPOINT, (ip, op))
+                for ip in range(1, self.inputs + 1)
+                for op in range(1, self.outputs + 1)
+            ]
         return keys
 
     def mute_keys(self) -> list[MuteKey]:
-        """Return all mute states that are exposed."""
-        keys: list[MuteKey] = [
-            (MuteType.INPUT, (number,)) for number in range(1, self.inputs + 1)
-        ]
-        keys.extend(
-            (MuteType.OUTPUT, (number,)) for number in range(1, self.outputs + 1)
-        )
+        """Return every mute reading this configuration should poll/expose."""
+        keys = [MuteKey(MuteType.INPUT, (ch,)) for ch in range(1, self.inputs + 1)]
+        keys += [MuteKey(MuteType.OUTPUT, (ch,)) for ch in range(1, self.outputs + 1)]
         if self.crosspoints:
-            keys.extend(
-                (MuteType.CROSSPOINT, (source, target))
-                for source in range(1, self.inputs + 1)
-                for target in range(1, self.outputs + 1)
-            )
+            keys += [
+                MuteKey(MuteType.CROSSPOINT, (ip, op))
+                for ip in range(1, self.inputs + 1)
+                for op in range(1, self.outputs + 1)
+            ]
         return keys
 
 
-@dataclass(frozen=True)
+@dataclass
 class IdrData:
-    """State of the iDR as read during one update."""
+    """A single poll's worth of data from the iDR."""
 
     unit_name: str
-    preset: int
-    response_time_ms: int
+    preset: int | None
+    response_time_ms: float
     integration_version: str
-    gains: dict[GainKey, float]
-    mutes: dict[MuteKey, bool]
+    gains: dict[GainKey, float] = field(default_factory=dict)
+    mutes: dict[MuteKey, bool] = field(default_factory=dict)
 
 
-def _gain_applied(requested: float, actual: float) -> bool:
-    """Return True when the gain read back matches the requested gain."""
-    if requested == -math.inf or actual == -math.inf:
-        return requested == actual
-    return abs(requested - actual) <= GAIN_TOLERANCE_DB
-
-
-def _command_failed(err: Exception) -> HomeAssistantError:
-    """Build the error that is shown when a command could not be sent."""
-    return HomeAssistantError(
-        translation_domain=DOMAIN,
-        translation_key="command_failed",
-        translation_placeholders={"error": str(err)},
-    )
-
-
-def _not_applied(requested: str, actual: str) -> HomeAssistantError:
-    """Build the error that is shown when the iDR did not apply a value."""
-    return HomeAssistantError(
-        translation_domain=DOMAIN,
-        translation_key="not_applied",
-        translation_placeholders={"requested": requested, "actual": actual},
-    )
+def _gain_matches(confirmed: float, requested: float) -> bool:
+    if math.isinf(confirmed) or math.isinf(requested):
+        return confirmed == requested
+    return abs(confirmed - requested) <= GAIN_TOLERANCE_DB
 
 
 class IdrCoordinator(DataUpdateCoordinator[IdrData]):
-    """Poll the iDR over its single Telnet connection and write changes."""
+    """Polls an iDR unit on a fixed interval and serves cached data to entities.
 
-    config_entry: IdrConfigEntry
+    Setup never blocks on the device being reachable: a config entry is set up
+    successfully even if the iDR is switched off at the time, and polling just
+    keeps retrying in the background on its normal schedule. ``data`` stays
+    ``None`` until the first successful poll, and entities are expected to
+    report themselves unavailable while that is the case (see ``entity.py``).
+    """
 
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: IdrConfigEntry,
+        entry: ConfigEntry,
         client: IdrClient,
         integration_version: str,
     ) -> None:
-        """Initialise the coordinator."""
-        options = IdrOptions.from_mapping(entry.options)
+        self.client = client
+        self.options = IdrOptions.from_mapping({**entry.data, **entry.options})
+        self._integration_version = integration_version
+        self._unreadable: set[str] = set()
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
-            name=DOMAIN,
-            update_interval=timedelta(seconds=options.scan_interval),
+            name=f"{entry.title} coordinator",
+            update_interval=timedelta(seconds=self.options.scan_interval),
         )
-        self.client = client
-        self.integration_version = integration_version
-        self.options = options
-        self.gain_keys = options.gain_keys()
-        self.mute_keys = options.mute_keys()
-        self._unreadable: set[GainKey | MuteKey] = set()
 
     async def _async_update_data(self) -> IdrData:
-        """Read the current state from the iDR, retrying connection drops."""
         try:
             return await self._async_fetch_with_retry()
         except IdrAuthError as err:
@@ -223,116 +204,139 @@ class IdrCoordinator(DataUpdateCoordinator[IdrData]):
             raise UpdateFailed(f"The iDR reported a problem: {err}") from err
 
     async def _async_fetch_with_retry(self) -> IdrData:
-        """Read the current state, retrying a few times on a dropped connection."""
-        attempt = 0
-        while True:
-            attempt += 1
+        """Fetch a full poll, retrying a few times on a connection failure."""
+        for attempt in range(1, CONNECT_RETRY_ATTEMPTS + 1):
             try:
                 return await self._async_fetch()
-            except IdrConnectionError:
-                if attempt >= CONNECT_RETRY_ATTEMPTS:
+            except IdrConnectionError as err:
+                if attempt == CONNECT_RETRY_ATTEMPTS:
                     raise
                 _LOGGER.debug(
-                    "Could not reach the iDR (attempt %s/%s), retrying in %.1fs",
+                    "Poll attempt %s/%s failed, retrying in %.1fs: %s",
                     attempt,
                     CONNECT_RETRY_ATTEMPTS,
                     CONNECT_RETRY_DELAY,
+                    err,
                 )
                 await asyncio.sleep(CONNECT_RETRY_DELAY)
+        # Unreachable: the final attempt above always returns or raises.
+        raise IdrConnectionError(f"Cannot reach {self.client.host}:{self.client.port}")
 
     async def _async_fetch(self) -> IdrData:
-        """Read the current state from the iDR in one pass."""
-        started = time.monotonic()
-        preset = await self.client.async_get_preset()
-        response_time_ms = round((time.monotonic() - started) * 1000)
-        unit_name = await self.client.async_get_unit_name()
-        gains = await self._async_read_gains()
-        mutes = await self._async_read_mutes()
+        start = time.monotonic()
+
+        try:
+            preset: int | None = await self.client.async_get_preset()
+        except IdrConnectionError:
+            raise
+        except IdrError as err:
+            self._report_unreadable("preset", err)
+            preset = None
+
+        try:
+            unit_name = await self.client.async_get_unit_name()
+        except IdrConnectionError:
+            raise
+        except IdrError as err:
+            self._report_unreadable("unit name", err)
+            unit_name = self.config_entry.title
+
+        gains: dict[GainKey, float] = {}
+        for key in self.options.gain_keys():
+            try:
+                gains[key] = await self.client.async_get_gain(key.gain_type, *key.channels)
+            except IdrConnectionError:
+                raise
+            except IdrError as err:
+                self._report_unreadable(key.unique_suffix, err)
+
+        mutes: dict[MuteKey, bool] = {}
+        for key in self.options.mute_keys():
+            try:
+                mutes[key] = await self.client.async_get_mute(key.mute_type, *key.channels)
+            except IdrConnectionError:
+                raise
+            except IdrError as err:
+                self._report_unreadable(key.unique_suffix, err)
+
+        response_time_ms = (time.monotonic() - start) * 1000
+
         return IdrData(
             unit_name=unit_name,
             preset=preset,
             response_time_ms=response_time_ms,
-            integration_version=self.integration_version,
+            integration_version=self._integration_version,
             gains=gains,
             mutes=mutes,
         )
 
-    async def _async_read_gains(self) -> dict[GainKey, float]:
-        """Read all exposed gains. A value that cannot be read is skipped."""
-        gains: dict[GainKey, float] = {}
-        for key in self.gain_keys:
-            kind, indices = key
-            try:
-                gains[key] = await self.client.async_get_gain(kind, indices)
-            except (IdrCommandError, IdrProtocolError) as err:
-                self._report_unreadable(key, err)
-            else:
-                self._unreadable.discard(key)
-        return gains
+    def _report_unreadable(self, label: str, err: IdrError) -> None:
+        if label not in self._unreadable:
+            self._unreadable.add(label)
+            _LOGGER.warning("Could not read %s from the iDR: %s", label, err)
+        else:
+            _LOGGER.debug("Could not read %s from the iDR: %s", label, err)
 
-    async def _async_read_mutes(self) -> dict[MuteKey, bool]:
-        """Read all exposed mute states. A value that cannot be read is skipped."""
-        mutes: dict[MuteKey, bool] = {}
-        for key in self.mute_keys:
-            kind, indices = key
-            try:
-                mutes[key] = await self.client.async_get_mute(kind, indices)
-            except (IdrCommandError, IdrProtocolError) as err:
-                self._report_unreadable(key, err)
-            else:
-                self._unreadable.discard(key)
-        return mutes
-
-    def _report_unreadable(self, key: GainKey | MuteKey, err: IdrError) -> None:
-        """Log a value that cannot be read, once until it can be read again."""
-        if key in self._unreadable:
-            return
-        self._unreadable.add(key)
-        kind, indices = key
-        _LOGGER.warning(
-            "Cannot read %s %s from the iDR: %s",
-            kind,
-            " ".join(str(index) for index in indices),
-            err,
-        )
-
-    async def async_write_gain(self, key: GainKey, gain: float) -> None:
-        """Set a gain and read it back to confirm."""
-        kind, indices = key
+    async def async_write_gain(self, key: GainKey, value: float) -> None:
+        """Write a gain and confirm it took effect, raising a translated error otherwise."""
         try:
-            await self.client.async_set_gain(kind, indices, gain)
-            actual = await self.client.async_get_gain(kind, indices)
-        except (IdrError, ValueError) as err:
-            raise _command_failed(err) from err
-        self.async_set_updated_data(
-            replace(self.data, gains={**self.data.gains, key: actual})
-        )
-        if not _gain_applied(gain, actual):
-            raise _not_applied(format_gain(gain), format_gain(actual))
+            await self.client.async_set_gain(key.gain_type, *key.channels, gain=value)
+            confirmed = await self.client.async_get_gain(key.gain_type, *key.channels)
+        except IdrError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="command_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
 
-    async def async_write_mute(self, key: MuteKey, muted: bool) -> None:
-        """Set a mute state and read it back to confirm."""
-        kind, indices = key
+        if not _gain_matches(confirmed, value):
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="not_applied",
+                translation_placeholders={
+                    "requested": f"{value:.1f}",
+                    "actual": f"{confirmed:.1f}",
+                },
+            )
+
+        if self.data is not None:
+            self.data.gains[key] = confirmed
+            self.async_set_updated_data(self.data)
+
+    async def async_write_mute(self, key: MuteKey, value: bool) -> None:
+        """Write a mute state and confirm it took effect."""
         try:
-            await self.client.async_set_mute(kind, indices, muted)
-            actual = await self.client.async_get_mute(kind, indices)
-        except (IdrError, ValueError) as err:
-            raise _command_failed(err) from err
-        self.async_set_updated_data(
-            replace(self.data, mutes={**self.data.mutes, key: actual})
-        )
-        if actual != muted:
-            raise _not_applied("On" if muted else "Off", "On" if actual else "Off")
+            await self.client.async_set_mute(key.mute_type, *key.channels, mute=value)
+            confirmed = await self.client.async_get_mute(key.mute_type, *key.channels)
+        except IdrError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="command_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
+
+        if confirmed != value:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="not_applied",
+                translation_placeholders={
+                    "requested": "on" if value else "off",
+                    "actual": "on" if confirmed else "off",
+                },
+            )
+
+        if self.data is not None:
+            self.data.mutes[key] = confirmed
+            self.async_set_updated_data(self.data)
 
     async def async_recall_preset(self, preset: int) -> None:
-        """Recall a preset, confirm it and reload all values."""
+        """Recall a preset and re-poll, since it can change many gains/mutes at once."""
         try:
             await self.client.async_set_preset(preset)
-            actual = await self.client.async_get_preset()
-        except (IdrError, ValueError) as err:
-            raise _command_failed(err) from err
-        if actual != preset:
-            self.async_set_updated_data(replace(self.data, preset=actual))
-            raise _not_applied(str(preset), str(actual))
-        # A preset changes levels and routing, so read everything again.
-        await self.async_refresh()
+        except IdrError as err:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="command_failed",
+                translation_placeholders={"error": str(err)},
+            ) from err
+        await self.async_request_refresh()

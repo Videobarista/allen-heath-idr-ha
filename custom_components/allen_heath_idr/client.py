@@ -1,78 +1,33 @@
-"""Asynchronous client for the Allen & Heath iDR Telnet control protocol.
+"""Telnet client for the Allen & Heath iDR control protocol.
 
-The iDR (firmware V3.50 and later) offers a line based text protocol on TCP
-port 23:
-
-* every command ends with a carriage return (line feeds are ignored);
-* the unit answers with the reply text followed by a prompt (``iDR8>`` or
-  ``iDR4>``) that is terminated by a NUL byte;
-* the input buffer of the unit is tiny, so exactly one command may be in
-  flight at any time (otherwise the unit answers ``Buffer Overrun``).
-
-This module has no Home Assistant dependencies.
+This module has no Home Assistant dependency so it can be exercised in
+isolation against a real or simulated iDR unit. See ``iDR-Telnet-Control-
+Protocol`` (Allen & Heath, firmware V3.50+) for the wire format this
+implements.
 """
 
 from __future__ import annotations
 
 import asyncio
+from enum import StrEnum
 import logging
 import math
-import re
-from dataclasses import dataclass
-from enum import StrEnum
-from typing import Final
+from typing import Final, NamedTuple
 
 _LOGGER = logging.getLogger(__name__)
 
-CONNECT_TIMEOUT: Final = 5.0
-COMMAND_TIMEOUT: Final = 5.0
+#: Words the iDR uses (and accepts back) for an "off"/-infinity gain.
+OFF_WORDS: Final[frozenset[str]] = frozenset({"-inf", "-infinity", "off"})
 
-MAX_CHANNELS: Final = 16
-MAX_IO_GROUPS: Final = 8
-MAX_CROSSPOINT_GROUPS: Final = 16
-PRESET_MIN: Final = 1
-PRESET_MAX: Final = 250
-
-_PROMPT_RE: Final = re.compile(r"iDR(?P<model>\d)>\s*$")
-_PASSWORD_RE: Final = re.compile(r"password\s*:\s*$", re.IGNORECASE)
-_UNIT_NAME_RE: Final = re.compile(
-    r"^\s*unit name\s*:\s*(?P<name>.*?)\s*$", re.IGNORECASE
-)
-_ERROR_MARKERS: Final = (
-    "not recognised",
-    "not recognized",
-    "invalid",
-    "error",
-    "overrun",
-    "out of range",
-    "illegal",
-    "unknown",
-)
-OFF_WORDS: Final = frozenset({"-inf", "off", "-infinity"})
-
-
-class IdrError(Exception):
-    """Base class for all iDR client errors."""
-
-
-class IdrConnectionError(IdrError):
-    """The iDR could not be reached or the connection was lost."""
-
-
-class IdrAuthError(IdrError):
-    """The iDR requires a password that is missing or wrong."""
-
-
-class IdrCommandError(IdrError):
-    """The iDR reported an error for a command."""
-
-
-class IdrProtocolError(IdrError):
-    """The iDR sent a reply that this client does not understand."""
+_PROMPT_SUFFIX: Final = ">"
+_LINE_END: Final = "\r"
+_TERMINATOR: Final = b"\x00"
+_PASSWORD_PROMPT: Final = "password:"
+_BYE_COMMAND: Final = "Bye"
 
 
 class GainType(StrEnum):
-    """Gain values that can be read and written."""
+    """Gain command types supported by the iDR."""
 
     INPUT = "IPGAIN"
     OUTPUT = "OPGAIN"
@@ -83,14 +38,14 @@ class GainType(StrEnum):
 
 
 class MuteType(StrEnum):
-    """Mute states that can be read and written."""
+    """Mute command types supported by the iDR."""
 
     INPUT = "IPMUTE"
     OUTPUT = "OPMUTE"
     CROSSPOINT = "XPMUTE"
 
 
-# Gain range in dB per type. Below the lower limit the gain is -INF (off).
+#: (min, max) dB range for each gain type, excluding the separate "-INF" off state.
 GAIN_LIMITS: Final[dict[GainType, tuple[float, float]]] = {
     GainType.INPUT: (-59.0, 5.0),
     GainType.OUTPUT: (-59.0, 5.0),
@@ -100,92 +55,77 @@ GAIN_LIMITS: Final[dict[GainType, tuple[float, float]]] = {
     GainType.CROSSPOINT_GROUP: (-64.0, 0.0),
 }
 
-_GAIN_INDEX_LIMITS: Final[dict[GainType, tuple[int, ...]]] = {
-    GainType.INPUT: (MAX_CHANNELS,),
-    GainType.OUTPUT: (MAX_CHANNELS,),
-    GainType.CROSSPOINT: (MAX_CHANNELS, MAX_CHANNELS),
-    GainType.INPUT_GROUP: (MAX_IO_GROUPS,),
-    GainType.OUTPUT_GROUP: (MAX_IO_GROUPS,),
-    GainType.CROSSPOINT_GROUP: (MAX_CROSSPOINT_GROUPS,),
-}
 
-_MUTE_INDEX_LIMITS: Final[dict[MuteType, tuple[int, ...]]] = {
-    MuteType.INPUT: (MAX_CHANNELS,),
-    MuteType.OUTPUT: (MAX_CHANNELS,),
-    MuteType.CROSSPOINT: (MAX_CHANNELS, MAX_CHANNELS),
-}
+class IdrIdentity(NamedTuple):
+    """Identifying information read back from a connected iDR."""
 
-
-@dataclass(frozen=True)
-class IdrIdentity:
-    """Basic identification of an iDR."""
-
-    unit_name: str
     model: str
+    unit_name: str
 
 
-def parse_gain(reply: str) -> float:
-    """Convert a gain reply to dB. ``-inf`` means the gain is off."""
-    text = reply.strip().lower()
-    if text.endswith("db"):
-        text = text[:-2].strip()
-    if text in OFF_WORDS:
+class IdrError(Exception):
+    """Base error for all iDR client failures."""
+
+
+class IdrConnectionError(IdrError):
+    """Raised when the iDR cannot be reached, or drops the connection."""
+
+
+class IdrAuthError(IdrError):
+    """Raised when the iDR requires or rejects a password."""
+
+
+class IdrCommandError(IdrError):
+    """Raised when the iDR rejects a command (out of range, buffer overrun, ...)."""
+
+
+class IdrProtocolError(IdrError):
+    """Raised when a reply cannot be parsed the way the protocol describes."""
+
+
+def parse_gain(text: str) -> float:
+    """Parse a gain value as returned by the iDR, honoring the off-words."""
+    cleaned = text.strip()
+    if cleaned.lower() in OFF_WORDS:
         return -math.inf
     try:
-        value = float(text)
+        return float(cleaned)
     except ValueError as err:
-        raise IdrProtocolError(f"Unexpected gain reply: {reply!r}") from err
-    if not math.isfinite(value):
-        raise IdrProtocolError(f"Unexpected gain reply: {reply!r}")
-    return value
+        raise IdrProtocolError(f"Could not parse gain value: {text!r}") from err
 
 
-def format_gain(gain: float) -> str:
-    """Convert a gain in dB to the text the iDR expects."""
-    if gain == -math.inf:
-        return "-Inf"
-    return f"{gain:.1f}"
+def format_gain(value: float) -> str:
+    """Format a gain value for sending to the iDR."""
+    if math.isinf(value) and value < 0:
+        return "-INF"
+    return f"{value:.1f}"
 
 
-def parse_mute(reply: str) -> bool:
-    """Convert a mute reply to a boolean (True means muted)."""
-    text = reply.strip().lower()
-    if text == "on":
+def parse_mute(text: str) -> bool:
+    """Parse an ON/OFF mute state as returned by the iDR."""
+    cleaned = text.strip().lower()
+    if cleaned in ("on", "1", "true"):
         return True
-    if text == "off":
+    if cleaned in ("off", "0", "false"):
         return False
-    raise IdrProtocolError(f"Unexpected mute reply: {reply!r}")
+    raise IdrProtocolError(f"Could not parse mute state: {text!r}")
 
 
-def _validate_indices(
-    kind: str, indices: tuple[int, ...], limits: tuple[int, ...]
-) -> None:
-    """Check that the index values are inside the ranges of the protocol."""
-    if len(indices) != len(limits):
-        raise ValueError(
-            f"{kind} needs {len(limits)} index value(s), got {len(indices)}"
-        )
-    for value, upper in zip(indices, limits, strict=True):
-        if not 1 <= value <= upper:
-            raise ValueError(f"{kind} index {value} is outside 1..{upper}")
-
-
-def _build_command(
-    verb: str, kind: str, indices: tuple[int, ...], *extra: str
-) -> str:
-    """Build a control string such as ``GET XPGAIN 1 2``."""
-    return " ".join([verb, kind, *(str(index) for index in indices), *extra])
-
-
-def _raise_if_error(reply: str) -> None:
-    """Raise IdrCommandError when the reply looks like an error message."""
-    lowered = reply.lower()
-    if any(marker in lowered for marker in _ERROR_MARKERS):
-        raise IdrCommandError(reply)
+def format_mute(value: bool) -> str:
+    """Format a mute state for sending to the iDR."""
+    return "ON" if value else "OFF"
 
 
 class IdrClient:
-    """Client for one iDR. Commands are sent strictly one at a time."""
+    """A single-connection Telnet client for an Allen & Heath iDR unit.
+
+    The iDR has a very small input buffer and only ever has one command in
+    flight: sending a second command before the first reply has arrived
+    gets a "Buffer Overrun" error back. Every reply, including the welcome
+    banner, ends with the unit's prompt (``iDR4>`` or ``iDR8>``) followed by
+    a NUL byte, which is what this client frames reads on rather than on
+    newlines.
+    """
 
     def __init__(
         self,
@@ -193,19 +133,19 @@ class IdrClient:
         port: int = 23,
         password: str | None = None,
         *,
-        connect_timeout: float = CONNECT_TIMEOUT,
-        command_timeout: float = COMMAND_TIMEOUT,
+        connect_timeout: float = 5.0,
+        command_timeout: float = 5.0,
     ) -> None:
-        """Initialise the client. No connection is made yet."""
         self._host = host
         self._port = port
         self._password = password
         self._connect_timeout = connect_timeout
         self._command_timeout = command_timeout
+
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._lock = asyncio.Lock()
-        self.model: str | None = None
+        self._model: str = "iDR"
 
     @property
     def host(self) -> str:
@@ -218,227 +158,212 @@ class IdrClient:
         return self._port
 
     @property
+    def model(self) -> str:
+        """Return the device model derived from its prompt (iDR4 or iDR8)."""
+        return self._model
+
+    @property
     def connected(self) -> bool:
-        """Return True when a connection to the iDR is open."""
-        return self._writer is not None
+        """Return whether a TCP connection is currently open."""
+        return self._writer is not None and not self._writer.is_closing()
 
-    # ------------------------------------------------------------------
-    # Connection handling
-    # ------------------------------------------------------------------
-
-    async def async_close(self) -> None:
-        """Close the connection. Safe to call more than once."""
-        async with self._lock:
-            await self._async_disconnect()
-
-    async def _async_disconnect(self) -> None:
-        """Close the connection without taking the command lock."""
-        writer = self._writer
-        self._reader = None
-        self._writer = None
-        if writer is not None:
-            await self._async_close_writer(writer)
-
-    @staticmethod
-    async def _async_close_writer(writer: asyncio.StreamWriter) -> None:
-        """Close a stream writer and log problems instead of hiding them."""
-        writer.close()
+    async def async_connect(self) -> None:
+        """Open the TCP connection and consume the welcome banner."""
+        if self.connected:
+            return
         try:
-            await writer.wait_closed()
-        except OSError as err:
-            _LOGGER.debug("Error while closing the connection: %s", err)
-
-    async def _async_ensure_connected(
-        self,
-    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        """Return the open connection, opening it first when needed."""
-        if self._reader is not None and self._writer is not None:
-            return self._reader, self._writer
-        return await self._async_connect()
-
-    async def _async_connect(
-        self,
-    ) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-        """Open a connection and wait for the first prompt."""
-        try:
-            async with asyncio.timeout(self._connect_timeout):
-                reader, writer = await asyncio.open_connection(
-                    self._host, self._port
-                )
-        except (OSError, TimeoutError) as err:
-            raise IdrConnectionError(
-                f"Cannot connect to {self._host}:{self._port}: {err}"
-            ) from err
+            self._reader, self._writer = await asyncio.wait_for(
+                asyncio.open_connection(self._host, self._port),
+                timeout=self._connect_timeout,
+            )
+        except (TimeoutError, OSError) as err:
+            raise IdrConnectionError(f"Cannot connect to {self._host}:{self._port}: {err}") from err
 
         try:
-            async with asyncio.timeout(self._command_timeout):
-                kind, _welcome = await self._async_read(reader, allow_password=True)
-                if kind == "password":
-                    await self._async_authenticate(reader, writer)
-        except (OSError, TimeoutError) as err:
-            await self._async_close_writer(writer)
-            raise IdrConnectionError(
-                f"No prompt from {self._host}:{self._port}: {err!r}"
-            ) from err
+            banner, needs_password = await self._async_read_banner()
+
+            if needs_password:
+                if self._password is None:
+                    raise IdrAuthError("The iDR requires a password but none was configured")
+                writer = self._require_writer()
+                try:
+                    writer.write((self._password + _LINE_END).encode("ascii"))
+                    await writer.drain()
+                    banner, needs_password = await self._async_read_banner()
+                except (OSError, IdrConnectionError) as err:
+                    # Per the protocol doc, the iDR allows exactly one password
+                    # attempt and drops the connection outright if it's wrong,
+                    # rather than reprompting - so treat a drop here as a
+                    # rejected password, not a generic connection failure.
+                    raise IdrAuthError("The iDR rejected the configured password") from err
+                if needs_password:
+                    raise IdrAuthError("The iDR rejected the configured password")
         except IdrError:
-            await self._async_close_writer(writer)
+            await self.async_close()
             raise
 
-        self._reader = reader
-        self._writer = writer
-        _LOGGER.debug(
-            "Connected to %s:%s (%s)", self._host, self._port, self.model
-        )
-        return reader, writer
+        self._model = self._extract_model(banner)
 
-    async def _async_authenticate(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
-        """Answer the password request of the iDR (one attempt only)."""
-        if not self._password:
-            raise IdrAuthError("The iDR is password protected but no password is set")
+    async def async_close(self) -> None:
+        """Close the TCP connection, if open, telling the iDR we're done."""
+        writer, self._writer, self._reader = self._writer, None, None
+        if writer is None:
+            return
         try:
-            writer.write(f"{self._password}\r".encode("latin-1"))
-        except UnicodeEncodeError as err:
-            raise IdrAuthError("The password contains unsupported characters") from err
-        await writer.drain()
+            writer.write((_BYE_COMMAND + _LINE_END).encode("ascii"))
+            await writer.drain()
+        except OSError:
+            pass
         try:
-            kind, _text = await self._async_read(reader, allow_password=True)
-        except (IdrConnectionError, OSError) as err:
-            # The iDR drops the connection after a wrong password.
-            raise IdrAuthError("The iDR rejected the password") from err
-        if kind == "password":
-            raise IdrAuthError("The iDR rejected the password")
+            writer.close()
+            await writer.wait_closed()
+        except OSError:
+            pass
 
-    async def _async_read(
-        self, reader: asyncio.StreamReader, *, allow_password: bool = False
-    ) -> tuple[str, str]:
-        """Read until a prompt (or password request) has arrived.
+    async def async_command(self, command: str) -> str:
+        """Send a single command and return its reply.
 
-        Returns ("prompt" | "password", text before the prompt). The caller is
-        responsible for the timeout.
-        """
-        buffer = ""
-        while True:
-            chunk = await reader.read(1024)
-            if not chunk:
-                raise IdrConnectionError("The iDR closed the connection")
-            buffer += chunk.decode("latin-1").replace("\x00", "")
-            prompt = _PROMPT_RE.search(buffer)
-            if prompt:
-                self.model = f"iDR-{prompt.group('model')}"
-                return "prompt", buffer[: prompt.start()].strip()
-            password = _PASSWORD_RE.search(buffer)
-            if allow_password and password:
-                return "password", buffer[: password.start()].strip()
-
-    # ------------------------------------------------------------------
-    # Commands
-    # ------------------------------------------------------------------
-
-    async def async_command(self, command: str, *, retry: bool = True) -> str:
-        """Send one command and return the reply text without the prompt.
-
-        When an already open connection turns out to be dead, the command is
-        sent once more on a fresh connection, unless retry is False (use that
-        for commands that must never be applied twice).
+        Reconnects and retries exactly once if the connection turns out to
+        be dead (e.g. the iDR timed out an idle session).
         """
         async with self._lock:
-            reused = self._writer is not None
-            try:
-                return await self._async_exchange(command)
-            except IdrConnectionError:
-                await self._async_disconnect()
-                if not (retry and reused):
-                    raise
-            _LOGGER.debug(
-                "Connection to %s:%s was lost, reconnecting", self._host, self._port
-            )
-            try:
-                return await self._async_exchange(command)
-            except IdrConnectionError:
-                await self._async_disconnect()
-                raise
+            last_error: IdrConnectionError | None = None
+            for attempt in (1, 2):
+                if not self.connected:
+                    await self.async_connect()
+                try:
+                    return await self._async_send(command)
+                except IdrConnectionError as err:
+                    last_error = err
+                    await self.async_close()
+                    if attempt == 2:
+                        raise
+                    _LOGGER.debug("Connection to iDR lost, retrying command once")
+            raise last_error or IdrConnectionError(f"Cannot reach {self._host}:{self._port}")
 
-    async def _async_exchange(self, command: str) -> str:
-        """Send a command on the current (or a new) connection."""
-        reader, writer = await self._async_ensure_connected()
+    async def _async_send(self, command: str) -> str:
+        writer = self._require_writer()
+        try:
+            writer.write((command + _LINE_END).encode("ascii"))
+            await writer.drain()
+            reply = await self._async_read_until_terminator()
+        except OSError as err:
+            raise IdrConnectionError(
+                f"Connection to {self._host}:{self._port} dropped: {err}"
+            ) from err
+
+        payload = self._strip_prompt(reply)
+        if "buffer overrun" in payload.lower():
+            raise IdrCommandError("The iDR reported a buffer overrun")
+        if payload.lower().startswith(("invalid", "unknown", "error")):
+            raise IdrCommandError(f"The iDR rejected the command: {payload}")
+        return payload
+
+    async def _async_read_until_terminator(self) -> str:
+        reader = self._require_reader()
+        try:
+            raw = await asyncio.wait_for(
+                reader.readuntil(_TERMINATOR), timeout=self._command_timeout
+            )
+        except asyncio.IncompleteReadError as err:
+            raise IdrConnectionError("The iDR closed the connection unexpectedly") from err
+        except (TimeoutError, OSError) as err:
+            raise IdrConnectionError(f"Timed out waiting for the iDR to reply: {err}") from err
+        return raw.decode("ascii", errors="replace").rstrip("\x00")
+
+    async def _async_read_banner(self) -> tuple[str, bool]:
+        """Read the post-connect banner and report whether it's a password prompt.
+
+        A normal banner ends in the usual NUL-terminated prompt, but a
+        password challenge is sent as a bare ``Password:`` with no
+        terminator at all, so this can't simply read until a NUL.
+        """
+        reader = self._require_reader()
+        buffer = b""
         try:
             async with asyncio.timeout(self._command_timeout):
-                writer.write(f"{command}\r".encode("ascii"))
-                await writer.drain()
-                _kind, text = await self._async_read(reader)
-        except (OSError, TimeoutError) as err:
+                while True:
+                    chunk = await reader.read(256)
+                    if not chunk:
+                        raise IdrConnectionError("The iDR closed the connection unexpectedly")
+                    buffer += chunk
+                    if _TERMINATOR in buffer:
+                        text = buffer.decode("ascii", errors="replace").rstrip("\x00")
+                        return text, False
+                    if buffer.rstrip().endswith(b"Password:"):
+                        return buffer.decode("ascii", errors="replace"), True
+        except TimeoutError as err:
+            raise IdrConnectionError(f"Timed out waiting for the iDR to reply: {err}") from err
+        except OSError as err:
             raise IdrConnectionError(
-                f"Command {command!r} failed on {self._host}:{self._port}: {err!r}"
+                f"Connection to {self._host}:{self._port} dropped: {err}"
             ) from err
-        _LOGGER.debug("iDR %s:%s %r -> %r", self._host, self._port, command, text)
-        if "buffer overrun" in text.lower():
-            await self._async_disconnect()
-            raise IdrCommandError(text)
-        return text
 
-    # ------------------------------------------------------------------
-    # Typed helpers
-    # ------------------------------------------------------------------
+    def _require_writer(self) -> asyncio.StreamWriter:
+        if self._writer is None:
+            raise IdrConnectionError(f"Not connected to {self._host}:{self._port}")
+        return self._writer
+
+    def _require_reader(self) -> asyncio.StreamReader:
+        if self._reader is None:
+            raise IdrConnectionError(f"Not connected to {self._host}:{self._port}")
+        return self._reader
+
+    @staticmethod
+    def _strip_prompt(reply: str) -> str:
+        """Strip the trailing ``\\riDRn>`` prompt, returning the content before it."""
+        prompt_start = reply.rfind(_LINE_END)
+        if prompt_start != -1 and reply[prompt_start:].rstrip().endswith(_PROMPT_SUFFIX):
+            reply = reply[:prompt_start]
+        return reply.strip("\r\n ")
+
+    @staticmethod
+    def _extract_model(banner: str) -> str:
+        for line in reversed(banner.splitlines()):
+            cleaned = line.strip("\r\n ")
+            if cleaned.endswith(_PROMPT_SUFFIX) and "idr" in cleaned.lower():
+                return cleaned[:-1]
+        return "iDR"
 
     async def async_get_unit_name(self) -> str:
-        """Return the unit name."""
-        reply = await self.async_command("GetUnitName")
-        match = _UNIT_NAME_RE.match(reply)
-        if match is None:
-            raise IdrProtocolError(f"Unexpected reply to GetUnitName: {reply!r}")
-        return match.group("name")
+        """Return the configured unit name."""
+        return await self.async_command("GetUnitName")
 
     async def async_get_identity(self) -> IdrIdentity:
-        """Return the unit name and the model derived from the prompt."""
+        """Return the model and unit name in a single round trip."""
         unit_name = await self.async_get_unit_name()
-        return IdrIdentity(unit_name=unit_name, model=self.model or "iDR")
+        return IdrIdentity(model=self._model, unit_name=unit_name)
 
     async def async_get_preset(self) -> int:
-        """Return the number of the current preset."""
+        """Return the currently active preset number."""
         reply = await self.async_command("GET PRESET")
-        _raise_if_error(reply)
         try:
             return int(reply.strip())
         except ValueError as err:
-            raise IdrProtocolError(f"Unexpected preset reply: {reply!r}") from err
+            raise IdrProtocolError(f"Could not parse preset number: {reply!r}") from err
 
     async def async_set_preset(self, preset: int) -> None:
-        """Recall a preset."""
-        if not PRESET_MIN <= preset <= PRESET_MAX:
-            raise ValueError(f"Preset {preset} is outside {PRESET_MIN}..{PRESET_MAX}")
-        _raise_if_error(await self.async_command(f"SET PRESET {preset}"))
+        """Recall the given preset number."""
+        await self.async_command(f"SET PRESET {preset}")
 
-    async def async_get_gain(self, kind: GainType, indices: tuple[int, ...]) -> float:
-        """Return a gain in dB (-inf when it is off)."""
-        _validate_indices(kind, indices, _GAIN_INDEX_LIMITS[kind])
-        reply = await self.async_command(_build_command("GET", kind, indices))
-        _raise_if_error(reply)
+    async def async_get_gain(self, gain_type: GainType, *channels: int) -> float:
+        """Return a gain value in dB (``-math.inf`` represents off)."""
+        args = " ".join(str(channel) for channel in channels)
+        reply = await self.async_command(f"GET {gain_type.value} {args}")
         return parse_gain(reply)
 
-    async def async_set_gain(
-        self, kind: GainType, indices: tuple[int, ...], gain: float
-    ) -> None:
-        """Set a gain in dB (use -math.inf for off)."""
-        _validate_indices(kind, indices, _GAIN_INDEX_LIMITS[kind])
-        lower, upper = GAIN_LIMITS[kind]
-        if gain != -math.inf and not lower <= gain <= upper:
-            raise ValueError(f"{kind} gain {gain} is outside {lower}..{upper} dB")
-        command = _build_command("SET", kind, indices, format_gain(gain))
-        _raise_if_error(await self.async_command(command))
+    async def async_set_gain(self, gain_type: GainType, *channels: int, gain: float) -> None:
+        """Set a gain value in dB (``-math.inf`` turns the channel off)."""
+        args = " ".join(str(channel) for channel in channels)
+        await self.async_command(f"SET {gain_type.value} {args} {format_gain(gain)}")
 
-    async def async_get_mute(self, kind: MuteType, indices: tuple[int, ...]) -> bool:
-        """Return a mute state (True means muted)."""
-        _validate_indices(kind, indices, _MUTE_INDEX_LIMITS[kind])
-        reply = await self.async_command(_build_command("GET", kind, indices))
-        _raise_if_error(reply)
+    async def async_get_mute(self, mute_type: MuteType, *channels: int) -> bool:
+        """Return a mute state."""
+        args = " ".join(str(channel) for channel in channels)
+        reply = await self.async_command(f"GET {mute_type.value} {args}")
         return parse_mute(reply)
 
-    async def async_set_mute(
-        self, kind: MuteType, indices: tuple[int, ...], muted: bool
-    ) -> None:
+    async def async_set_mute(self, mute_type: MuteType, *channels: int, mute: bool) -> None:
         """Set a mute state."""
-        _validate_indices(kind, indices, _MUTE_INDEX_LIMITS[kind])
-        command = _build_command("SET", kind, indices, "On" if muted else "Off")
-        _raise_if_error(await self.async_command(command))
+        args = " ".join(str(channel) for channel in channels)
+        await self.async_command(f"SET {mute_type.value} {args} {format_mute(mute)}")

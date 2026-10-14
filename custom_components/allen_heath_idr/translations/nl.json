@@ -2,51 +2,68 @@
   "config": {
     "step": {
       "user": {
-        "title": "Verbinden met een Allen & Heath iDR",
-        "description": "Vul het adres van de netwerkpoort van de iDR in. De unit moet firmware V3.50 of nieuwer hebben, want die is nodig voor het Telnet-besturingsprotocol.",
         "data": {
-          "host": "IP-adres",
+          "host": "Host",
           "port": "Poort",
           "password": "Wachtwoord"
         },
         "data_description": {
-          "host": "Het IP-adres van de netwerkpoort van de iDR.",
-          "port": "De Telnet-poort van de iDR. Dit is 23, tenzij je die hebt aangepast.",
-          "password": "Alleen nodig als er een wachtwoord op de iDR is ingesteld."
+          "host": "Het IP-adres of de hostnaam van de iDR.",
+          "port": "De Telnet-besturingspoort (23, tenzij je dit op het apparaat hebt gewijzigd).",
+          "password": "Alleen nodig als er een Telnet-wachtwoord is ingesteld op het apparaat."
         }
       },
       "reauth_confirm": {
-        "title": "Wachtwoord vereist",
-        "description": "De iDR op {host} vraagt om een wachtwoord. Vul het huidige wachtwoord in.",
+        "title": "Opnieuw aanmelden bij de iDR",
         "data": {
           "password": "Wachtwoord"
+        },
+        "data_description": {
+          "password": "De iDR heeft het vorige wachtwoord afgewezen. Voer het huidige wachtwoord in."
         }
       },
       "reconfigure": {
-        "title": "Verbindingsinstellingen wijzigen",
-        "description": "Wijzig hoe Home Assistant verbinding maakt met de iDR.",
         "data": {
-          "host": "IP-adres",
+          "host": "Host",
           "port": "Poort",
           "password": "Wachtwoord"
         },
         "data_description": {
-          "host": "Het IP-adres van de netwerkpoort van de iDR.",
-          "port": "De Telnet-poort van de iDR. Dit is 23, tenzij je die hebt aangepast.",
-          "password": "Alleen nodig als er een wachtwoord op de iDR is ingesteld."
+          "host": "Het IP-adres of de hostnaam van de iDR.",
+          "port": "De Telnet-besturingspoort (23, tenzij je dit op het apparaat hebt gewijzigd).",
+          "password": "Alleen nodig als er een Telnet-wachtwoord is ingesteld op het apparaat."
         }
       }
     },
     "error": {
-      "cannot_connect": "Geen verbinding met de iDR. Controleer het IP-adres en de netwerkverbinding.",
-      "invalid_auth": "Het wachtwoord ontbreekt of is onjuist.",
-      "invalid_response": "Het apparaat antwoordde niet als een iDR. Controleer of het firmware V3.50 of nieuwer heeft.",
-      "already_configured": "Er is al een iDR met dit adres en deze poort ingesteld."
+      "cannot_connect": "Kan de iDR niet bereiken. Controleer host/poort en of het apparaat aan staat en verbonden is met het netwerk.",
+      "invalid_auth": "De iDR heeft het wachtwoord afgewezen.",
+      "invalid_response": "De iDR reageerde op een manier die deze integratie niet begrijpt."
     },
     "abort": {
-      "already_configured": "Er is al een iDR met dit adres en deze poort ingesteld.",
-      "reauth_successful": "Het wachtwoord is bijgewerkt.",
-      "reconfigure_successful": "De verbindingsinstellingen zijn bijgewerkt."
+      "already_configured": "Deze iDR is al geconfigureerd.",
+      "reauth_successful": "Opnieuw aanmelden is gelukt.",
+      "reconfigure_successful": "Herconfigureren is gelukt."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "inputs": "Aantal ingangskanalen",
+          "outputs": "Aantal uitgangskanalen",
+          "expose_groups": "Groep-gain-bedieningen voor in- en uitgangen tonen",
+          "expose_crosspoints": "Crosspoint-gain- en mute-bedieningen tonen",
+          "scan_interval": "Pollinterval (seconden)"
+        },
+        "data_description": {
+          "inputs": "Hoeveel van de 16 ingangskanalen van het apparaat als entiteiten worden getoond.",
+          "outputs": "Hoeveel van de 16 uitgangskanalen van het apparaat als entiteiten worden getoond.",
+          "expose_groups": "Voegt 16 extra entiteiten toe (8 ingangs- + 8 uitgangsgroep-gains).",
+          "expose_crosspoints": "Voegt een gain- en een mute-entiteit toe voor elke ingangs-/uitgangscombinatie in de routingmatrix (ingangen x uitgangen x 2) — dit kunnen veel entiteiten worden, zie de README.",
+          "scan_interval": "Hoe vaak het apparaat wordt gepolld. Lagere waarden reageren sneller maar belasten de ene Telnet-verbinding meer."
+        }
+      }
     }
   },
   "entity": {
@@ -61,22 +78,19 @@
         "name": "Uitgang {channel} gain"
       },
       "crosspoint_gain": {
-        "name": "Ingang {input} naar uitgang {output} gain"
+        "name": "Ingang {input} → uitgang {output} gain"
       },
       "input_group_gain": {
-        "name": "Ingangsgroep {group} gain"
+        "name": "Ingangsgroep {channel} gain"
       },
       "output_group_gain": {
-        "name": "Uitgangsgroep {group} gain"
+        "name": "Uitgangsgroep {channel} gain"
       },
       "crosspoint_group_gain": {
-        "name": "Crosspoint-groep {group} gain"
+        "name": "Crosspointgroep {channel} gain"
       }
     },
     "sensor": {
-      "unit_name": {
-        "name": "Unitnaam"
-      },
       "response_time": {
         "name": "Responstijd"
       },
@@ -92,66 +106,44 @@
         "name": "Uitgang {channel} mute"
       },
       "crosspoint_mute": {
-        "name": "Ingang {input} naar uitgang {output} mute"
-      }
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Kanalen en bediening",
-        "description": "Kies welke kanalen en bediening worden aangemaakt. De iDR heeft altijd 16 ingangs- en 16 uitgangskanalen, maar alleen de kanalen die je gebruikt hebben een entiteit nodig.",
-        "data": {
-          "inputs": "Aantal ingangskanalen",
-          "outputs": "Aantal uitgangskanalen",
-          "expose_groups": "Groepsgains",
-          "expose_crosspoints": "Crosspoint-gain en -mute",
-          "scan_interval": "Verversingsinterval"
-        },
-        "data_description": {
-          "inputs": "Ingangskanalen 1 tot dit aantal krijgen een gain- en mute-entiteit.",
-          "outputs": "Uitgangskanalen 1 tot dit aantal krijgen een gain- en mute-entiteit.",
-          "expose_groups": "Maak gain-entiteiten voor de 8 ingangsgroepen, 8 uitgangsgroepen en 16 crosspoint-groepen.",
-          "expose_crosspoints": "Maak een gain- en mute-entiteit voor elke crosspoint (ingangen x uitgangen). Dit kunnen er veel zijn.",
-          "scan_interval": "Hoe vaak de status van de iDR wordt uitgelezen, in seconden."
-        }
+        "name": "Ingang {input} → uitgang {output} mute"
       }
     }
   },
   "exceptions": {
     "command_failed": {
-      "message": "De iDR kon niet worden bijgewerkt: {error}"
+      "message": "De iDR accepteerde de opdracht niet: {error}"
     },
     "not_applied": {
-      "message": "De iDR heeft de waarde {requested} niet overgenomen. Hij meldt {actual}."
+      "message": "Aan de iDR gevraagd om {requested}, maar deze meldt {actual}. De wijziging is mogelijk niet toegepast."
     },
     "crosspoint_needs_gain_or_mute": {
-      "message": "Geef een gain, een mute, of beide op."
+      "message": "Geef een gain, een mute-status, of beide op."
     },
     "entity_not_found": {
-      "message": "Geen Allen & Heath iDR gevonden voor entiteit {entity_id}."
+      "message": "{entity_id} is geen bekende Allen & Heath iDR-entiteit."
     }
   },
   "services": {
     "set_crosspoint": {
       "name": "Crosspoint instellen",
-      "description": "Zet de gain en/of mute van één crosspoint (een ingang naar een uitgang) op de routeringsmatrix van de iDR. Geef minstens gain of mute op. Werkt ook als de crosspoint-entiteiten niet zijn ingeschakeld voor dit apparaat.",
+      "description": "Stelt de gain en/of mute-status in van één ingangs-/uitgangscrosspoint in de routingmatrix, ook als de entiteiten van die crosspoint niet zijn ingeschakeld in de opties van de integratie.",
       "fields": {
         "input": {
           "name": "Ingangskanaal",
-          "description": "Het ingangskanaalnummer."
+          "description": "Ingangskanaalnummer (1-16)."
         },
         "output": {
           "name": "Uitgangskanaal",
-          "description": "Het uitgangskanaalnummer."
+          "description": "Uitgangskanaalnummer (1-16)."
         },
         "gain": {
           "name": "Gain",
-          "description": "De gain in dB, of \"off\" om de crosspoint volledig uit te schakelen (-infinity)."
+          "description": "Gain in dB (-40 tot 0), of \"-Inf\"/\"off\" om de crosspoint uit te schakelen."
         },
         "mute": {
           "name": "Mute",
-          "description": "Mute of unmute de crosspoint."
+          "description": "Of de crosspoint gedempt moet worden."
         }
       }
     }

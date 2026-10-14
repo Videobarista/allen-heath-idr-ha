@@ -1,0 +1,34 @@
+# Self-assessed alignment with the Home Assistant integration quality scale,
+# Bronze tier. This is informal — Home Assistant only grades core
+# integrations, so this is not an official rating, just a checklist this
+# integration is held to.
+rules:
+  action-setup: done
+  appropriate-polling: done
+  brands: done
+  common-modules: done
+  config-flow: done
+  config-flow-test-coverage: done
+  dependency-transparency: done
+  docs-actions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  entity-event-setup:
+    status: exempt
+    comment: >-
+      All entities are purely polled by the coordinator; none subscribe to
+      push-based device events.
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup:
+    status: exempt
+    comment: >-
+      Deliberately not applied. The iDR is commonly switched off at the wall
+      (or via a NET IO / mains control) when Home Assistant restarts, so
+      config entry setup always succeeds and the coordinator keeps retrying
+      on its normal polling schedule instead of failing setup when the
+      device happens to be unreachable at that moment.
+  unique-config-entry: done

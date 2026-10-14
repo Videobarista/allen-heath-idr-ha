@@ -1,223 +1,212 @@
 # Allen & Heath iDR for Home Assistant
 
-[![GitHub Release](https://img.shields.io/github/v/release/Videobarista/allen-heath-idr-ha)](https://github.com/Videobarista/allen-heath-idr-ha/releases)
-[![License: MIT](https://img.shields.io/github/license/Videobarista/allen-heath-idr-ha)](LICENSE)
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
+[![Release](https://img.shields.io/github/v/release/Videobarista/allen-heath-idr-ha)](https://github.com/Videobarista/allen-heath-idr-ha/releases)
+[![License](https://img.shields.io/github/license/Videobarista/allen-heath-idr-ha)](LICENSE)
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![Open your Home Assistant instance and open this repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Videobarista&repository=allen-heath-idr-ha&category=integration)
+[![Works with Home Assistant 2025.1+](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5)](https://www.home-assistant.io)
+[![Ruff](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/ruff.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/ruff.yml)
+[![Hassfest](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hassfest.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hassfest.yml)
+[![HACS Validate](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hacs.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hacs.yml)
+[![CodeQL](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/codeql.yml)
+[![Tests](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/tests.yml)
 
-[![Hassfest](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hassfest.yml/badge.svg)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hassfest.yml)
-[![HACS validation](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hacs.yml/badge.svg)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hacs.yml)
-[![CodeQL](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/codeql.yml/badge.svg)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/codeql.yml)
-[![Ruff](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/ruff.yml/badge.svg)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/ruff.yml)
+A local-polling Home Assistant integration for the Allen & Heath iDR-4 / iDR-8
+audio mix processor, controlled over its Telnet protocol (TCP port 23). No
+cloud, no app, no third-party server.
 
-A custom [Home Assistant](https://www.home-assistant.io/) integration for the
-Allen & Heath **iDR** audio mix processors (iDR-4 and iDR-8). It talks to the
-unit over the network with the Telnet control protocol, fully local and without
-any cloud.
-
-> This project is not affiliated with or endorsed by Allen & Heath.
+Not affiliated with or endorsed by Allen & Heath. "Allen & Heath" and "iDR"
+are trademarks of their respective owner.
 
 ## Status
 
-Feature-complete for what the iDR Telnet protocol offers: reads and controls
-gains, mutes, presets and the full crosspoint matrix.
-
-| Version | Content |
-| ------- | ------- |
-| 0.1.0 | Connection, config flow, diagnostic sensors |
-| 0.2.0 | Input and output gain and mute, preset recall, optional group gains and crosspoints, options |
-| 0.2.1 | Retries a dropped connection a few times before marking the iDR unavailable |
-| 0.2.2 | Documentation only: clarified the options screen and entity counts |
-| 1.0.0 | First stable release. Adds an Integration version diagnostic entity |
-| 1.1.0 | New `allen_heath_idr.set_crosspoint` service |
-| 1.1.1 | Fixed the service's target: Home Assistant removed device filters from service targets |
-| 1.1.2 | Clearer message when the iDR cannot be reached (no more raw network error text) |
+| Version | Notes |
+|---|---|
+| 1.2.0 | Setup no longer fails when the iDR is switched off at startup (it's assumed to simply be offline and polling keeps retrying); aligned the integration with the Home Assistant quality scale Bronze tier (tests, `quality_scale.yaml`). |
+| 1.1.2 | Friendlier, specific error message when the iDR can't be reached. |
+| 1.1.1 | Fixed `set_crosspoint` after a Home Assistant breaking change removed device filters from service targets; the service now targets entities (a device pick still works, HA expands it automatically). |
+| 1.1.0 | Added the `set_crosspoint` service for scripting a single crosspoint without needing its entities enabled. |
+| 1.0.0 | Added an "Integration version" diagnostic sensor; crosspoint matrix support (optional, off by default) with configurable channel counts, groups and poll interval. |
+| 0.2.0 | Gain, mute and preset control. |
+| 0.1.0 | Initial release: read-only sensors. |
 
 ## Requirements
 
-- An iDR-4 or iDR-8 with firmware **V3.50 or later** (the Telnet control
-  protocol was introduced in that version). To read the firmware version, remove
-  the face plate and hold the ESC key.
-- The network port of the iDR connected to a network that Home Assistant can
-  reach. The Telnet server listens on TCP port 23.
-- Home Assistant 2025.1 or newer.
+- An iDR-4 or iDR-8 running firmware **V3.50 or later** (the Telnet control
+  protocol was introduced in that version).
+- The iDR's Telnet port (23) reachable from Home Assistant. There's no way to
+  check the firmware version over Telnet itself — if nothing responds, try
+  updating the unit's firmware first.
 
 ## Installation
 
 ### HACS (custom repository)
 
-1. In HACS, open the menu (three dots) and choose **Custom repositories**.
-2. Add `https://github.com/Videobarista/allen-heath-idr-ha` with category
-   **Integration**.
-3. Download **Allen & Heath iDR** and restart Home Assistant.
+1. HACS → the **⋮** menu (top right) → **Custom repositories**.
+2. Add `https://github.com/Videobarista/allen-heath-idr-ha`, category **Integration**.
+3. Find "Allen & Heath iDR" in HACS and install it.
+4. Restart Home Assistant.
+
+Or use the badge above ("Open in HACS") to jump straight to adding the
+repository.
 
 ### Manual
 
-Copy the folder `custom_components/allen_heath_idr` to the `custom_components`
-folder of your Home Assistant configuration and restart Home Assistant.
+Copy `custom_components/allen_heath_idr` into your Home Assistant `config/custom_components/` folder and restart.
 
 ## Configuration
 
-Go to **Settings > Devices & services > Add integration** and search for
-**Allen & Heath iDR**. Enter the IP address of the iDR. The port is 23 unless you
-changed it. Fill in the password only when one has been set on the unit.
+**Settings → Devices & Services → Add Integration → "Allen & Heath iDR"**, then enter:
 
-The address, port and password can be changed later with **Reconfigure**.
+- **Host** — the iDR's IP address or hostname.
+- **Port** — 23, unless you've changed it on the unit.
+- **Password** — only if a Telnet password is set on the unit.
 
 ### Options
 
-The number of channels and whether the routing matrix is exposed are **not**
-asked during setup — they live in a separate options screen that is easy to
-miss:
+After adding the integration, open its entry and click **Configure** to set:
 
-1. Go to **Settings > Devices & services**.
-2. Find the **Allen & Heath iDR** card and click it (or its three-dot menu).
-3. Choose **Configure**.
+| Option | Default | What it does |
+|---|---|---|
+| Number of input channels | 8 | How many of the 16 possible inputs to expose. |
+| Number of output channels | 8 | How many of the 16 possible outputs to expose. |
+| Expose groups | Off | Adds 16 entities (8 input + 8 output group gains). |
+| Expose crosspoints | Off | Adds a gain **and** a mute entity for every input/output pair — see below before turning this on. |
+| Poll interval | 10s | How often to poll. Lower reacts faster but puts more load on the iDR's single Telnet connection. |
 
-| Option | Default | Description |
-| ------ | ------- | ----------- |
-| Number of input channels | 8 | Input channels 1 up to this number get a gain and mute entity |
-| Number of output channels | 8 | Output channels 1 up to this number get a gain and mute entity |
-| Group gains | off | Gain entities for the 8 input groups, 8 output groups and 16 crosspoint groups |
-| Crosspoint gain and mute | off | A gain and mute entity for every crosspoint (inputs x outputs) |
-| Update interval | 10 s | How often the unit is read |
+Most Home Assistant users don't expect an integration to have an options
+step at all — if **Configure** isn't greyed out on the integration's card,
+that's where these live.
 
-The iDR always has 16 input and 16 output channels in its matrix. Only channels
-that you use need an entity. Submitting the form applies the change immediately
-and reloads the integration.
+**Crosspoints adds a lot of entities, on purpose.** Every input/output pair
+gets its own gain and mute entity (inputs × outputs × 2), because that's
+what it takes to control a true mixing matrix (see below). Some examples:
 
-#### How many entities does this create?
+| Inputs × outputs | Groups | Crosspoints | Entities |
+|---|---|---|---|
+| 8 × 8 | off | off | 35 (the default) |
+| 8 × 8 | on | on | 179 |
+| 16 × 16 | off | off | 67 |
+| 16 × 16 | on | on | 595 |
 
-Every channel gets a gain **and** a mute entity, and so does every crosspoint,
-so the numbers add up faster than they might look. A few examples (plus 1
-preset and 2 diagnostic entities in every case):
-
-| Setup | Entities |
-| ----- | -------- |
-| Default (8 in / 8 out, no groups, no crosspoints) | 35 |
-| 8 in / 8 out, with crosspoints | 163 |
-| 16 in / 16 out, with crosspoints | 579 |
-
-Crosspoints are the big multiplier: inputs &times; outputs &times; 2. Leave
-that option off until you are ready to use it, for example to build a
-dashboard for the routing matrix — the per-channel gain and mute entities
-already cover simple level and mute control on their own.
+If you only need to script one or two crosspoints, the `set_crosspoint`
+service (below) does that without turning this option on at all.
 
 ## Entities
 
-| Entity | Description |
-| ------ | ----------- |
-| Preset (number) | The active preset. Setting a value **recalls that preset immediately** |
-| Input / Output gain (number) | Gain in dB in steps of 0.5 |
-| Input / Output mute (switch) | On means muted |
-| Group gain (number, optional) | Master gain of an input, output or crosspoint group |
-| Crosspoint gain (number, optional) | Level of an input on an output |
-| Crosspoint mute (switch, optional) | Mute of an input on an output |
-| Unit name (diagnostic) | Name of the unit as set on the iDR |
-| Response time (diagnostic) | Time the iDR needed to answer a request, in milliseconds |
-| Integration version (diagnostic) | Installed version of this integration, for bug reports |
+- **Number**: preset recall, one gain per input/output/group/crosspoint channel exposed.
+- **Switch**: one mute per input/output/crosspoint channel exposed.
+- **Sensor** (diagnostic): response time, integration version.
 
 ### Gain values
 
-The gain of a channel, group or crosspoint can be switched off completely
-(-infinity). A number entity shows this as its lowest value: -60 dB for channels,
--41 dB for crosspoints and -65 dB for groups. The attribute `off` is `true` in
-that case. Setting the lowest value, or anything below the lowest real gain,
-switches the gain off.
+The iDR reports an "off" channel as `-Inf`, which isn't a normal dB value, so
+each gain number's range includes one extra step below its real minimum,
+reserved as the off position — move the slider all the way down (or set it
+to that value) to turn the channel off, same as the unit's own front panel.
+Each gain entity also exposes an `off` attribute if you'd rather check that
+in a template or automation than compare numbers.
 
-After every change the integration reads the value back from the iDR. What you
-see is what the unit reports, so a value that the unit rounds to its own step is
-shown as rounded. When the unit does not apply a value, Home Assistant shows an
-error.
+### Why a gain and mute per crosspoint, not one dropdown?
 
-### Why a gain and mute per crosspoint, not a single "source" dropdown?
-
-A routing matrix that only ever sends one source to an output would be fully
-described by a dropdown per output. The iDR matrix is a real
-**mixer**: several inputs can feed the same output at the same time, each at
-its own level, and the levels sum together. Collapsing that into one dropdown
-per output would only work for exclusive routing and would hide the mixing use
-that this hardware is built for (paging over background music, combining
-microphones into one zone, and so on).
-
-The raw entities stay the source of truth for that reason. A dashboard card
-that lays the crosspoints out as a compact grid, instead of a long flat entity
-list, is the planned way to make them practical to use day to day.
+A routing matrix (like a video router) sends one input to an output at a
+time, so a dropdown per output makes sense there. The iDR's matrix is a true
+*mixer*: several inputs can be summed into one output simultaneously, each at
+its own independent level. That needs a value per input/output pair, not a
+single selection — which is why crosspoints are exposed as individual gain
+and mute entities rather than one entity per output.
 
 ## Services
 
 ### `allen_heath_idr.set_crosspoint`
 
-Set the gain and/or mute of one crosspoint by input and output number.
-Target the iDR device; Home Assistant no longer supports targeting a service
-by device directly, so under the hood this targets any entity of that
-device, which is the same thing from the picker in the UI:
+Sets the gain and/or mute state of a single crosspoint, even if crosspoint
+entities aren't enabled in the integration's options. Useful for scripting a
+handful of crosspoints without the full entity count above.
 
 ```yaml
 action: allen_heath_idr.set_crosspoint
 target:
-  device_id: <the iDR device>
+  device_id: <your iDR device>
 data:
-  input: 2
-  output: 5
-  gain: -6.5   # a number in dB, or "off" for -infinity
-  mute: false  # optional; give gain, mute, or both
+  input: 1
+  output: 3
+  gain: -6.0
+  mute: false
 ```
 
-This is meant for automations, scripts, and the future dashboard card: `input`
-and `output` are always plain channel numbers, so callers do not need to know
-how Home Assistant slugged the entity for that specific crosspoint. Setting
-gain and mute together also happens as one action instead of two separate
-calls. The service writes directly to the iDR and works even when the
-crosspoint entities are not enabled for this device, so it can be used purely
-by automations without adding any entities.
+`gain` accepts a dB value or `"-Inf"` / `"off"`. At least one of `gain` or
+`mute` is required.
+
+## Offline behavior
+
+The integration is built to assume the iDR can simply be switched off —
+whether at the wall, or via a mains/NET IO control — and treats that as a
+normal state, not a setup failure:
+
+- Setting up the integration (including after a Home Assistant restart)
+  **always succeeds**, even if the iDR doesn't respond at that moment.
+- While unreachable, all of its entities show as **unavailable** rather than
+  the integration failing to load.
+- Polling keeps retrying in the background on the normal interval, and
+  everything comes back automatically once the unit powers back on — no
+  reload needed.
+
+The one exception is the very first time you add the integration: the setup
+wizard does need to reach the iDR once, to read its name and model.
 
 ## Good to know
 
-- The iDR accepts one command at a time and has a very small input buffer. The
-  integration therefore keeps a single connection open and sends commands one
-  after another. The unit allows up to 10 simultaneous Telnet connections.
-- Changes made on the unit or in iDR System Manager are picked up when Home
-  Assistant polls the unit (every 10 seconds by default). Changes made from
-  Home Assistant show immediately.
-- Recalling a preset changes levels and routing on the unit, and all values are
-  read again afterwards.
-- The Telnet protocol is not encrypted, and a password (if set) is sent as
-  plain text. Keep the iDR on a trusted network or VLAN.
-- The password handling follows the protocol description of Allen & Heath and has
-  not yet been verified on a unit that has a password set.
-- The device page does not show a firmware version, because the iDR does not
-  expose its own firmware version over the Telnet protocol. The Integration
-  version diagnostic entity shows the version of this integration instead,
-  which is what matters for bug reports.
-- If the iDR is unreachable when Home Assistant starts (or when the
-  integration is added or reloaded), Home Assistant shows **"Failed setup,
-  will retry"** for the entry and keeps retrying on its own schedule. That
-  status text is standard Home Assistant behaviour for any device that is
-  offline at startup and cannot be changed by this integration, but the
-  message below it is: it names the host and port and does not show raw
-  network error details. If the iDR only goes offline *after* a successful
-  start, entities turn "unavailable" instead, without this message.
+- The iDR only ever has **one** Telnet command in flight — sending a second
+  before the first reply arrives gets a "Buffer Overrun" error back. This
+  integration serializes every read and write through a single connection,
+  so it won't trip that itself, but a very short poll interval combined with
+  a lot of manual changes at the same time could still be slow to catch up.
+- Recalling a preset can change many gains and mutes at once, so the
+  integration re-reads everything right after a recall rather than waiting
+  for the next scheduled poll.
+- The Telnet connection is unencrypted, and a configured password is sent in
+  plain text — this is a limitation of the iDR's own protocol, not something
+  this integration can change. Only use it on a network you trust.
+- Password handling has not been verified against a real password-protected
+  unit (the protocol document is slightly ambiguous about the exact bytes
+  sent on a wrong password); if you hit trouble here, please open an issue
+  with what you saw.
+- The iDR's firmware version isn't available over Telnet, so there's no
+  sensor for it — only this integration's own version (see the "Integration
+  version" diagnostic sensor).
+
+## Quality scale
+
+This integration aims to stay aligned with the Home Assistant quality scale,
+**Bronze** tier — see [`quality_scale.yaml`](custom_components/allen_heath_idr/quality_scale.yaml)
+for the checklist and the one deliberate exception (setup doesn't fail when
+the device is offline, by design — see "Offline behavior" above). This is a
+self-assessment: Home Assistant only officially grades core integrations, so
+nothing here is an official rating. Higher tiers aren't a current goal.
 
 ## Troubleshooting
 
-Enable debug logging to see every command and reply:
+Enable debug logging in `configuration.yaml`:
 
 ```yaml
 logger:
+  default: info
   logs:
     custom_components.allen_heath_idr: debug
 ```
 
-- **Cannot connect**: check the IP address and that the iDR and Home Assistant
-  can reach each other (VLANs and firewalls).
-- **Did not answer like an iDR**: check that the firmware is V3.50 or later.
+## Removing the integration
+
+**Settings → Devices & Services → Allen & Heath iDR → ⋮ → Delete.** This
+only removes the integration and its entities from Home Assistant; it has no
+effect on the iDR unit itself.
 
 ## Brand
 
-The `Brand` folder is meant for logo files. Logos of Allen & Heath are not
-included.
+`Brand/` contains a generic, self-drawn icon — not Allen & Heath's own logo,
+for copyright reasons. See [`Brand/README.md`](Brand/README.md).
 
 ## License
 
-[MIT](LICENSE)
+MIT — see [LICENSE](LICENSE).

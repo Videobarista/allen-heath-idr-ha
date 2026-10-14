@@ -1,21 +1,17 @@
 # Security Policy
 
-## Supported versions
+## Supported Versions
 
-Only the latest release receives fixes.
+Only the latest released version of this integration is supported with
+security updates.
 
-## Reporting a vulnerability
+## Reporting a Vulnerability
 
-Please do not open a public issue for a security problem.
+If you discover a security vulnerability, please open a private report via
+[GitHub Security Advisories](https://github.com/Videobarista/allen-heath-idr-ha/security/advisories/new)
+rather than a public issue.
 
-Use GitHub's private vulnerability reporting instead: open the **Security** tab
-of this repository and choose **Report a vulnerability**. Include the version of
-the integration, the iDR firmware version and steps to reproduce the problem.
-
-You can expect a first response within a few days.
-
-## Good to know
-
-The iDR Telnet control protocol is not encrypted. The password, if you set one
-on the unit, is sent as plain text. Keep the iDR on a trusted network or VLAN
-and do not expose its Telnet port to the internet.
+Note that this integration only talks to a device on your local network
+over plain, unencrypted Telnet — the Allen & Heath iDR control protocol
+itself provides no encryption and sends any configured password in plain
+text. This integration does not expose any inbound network service itself.

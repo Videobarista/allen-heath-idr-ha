@@ -1,21 +1,22 @@
-"""Number entities (gains and preset) for the Allen & Heath iDR integration."""
+"""Number platform for the Allen & Heath iDR integration."""
 
 from __future__ import annotations
 
 import math
-from typing import Any, Final
 
 from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .client import GAIN_LIMITS, PRESET_MAX, PRESET_MIN, GainType
-from .coordinator import GainKey, IdrConfigEntry, IdrCoordinator
+from .client import GAIN_LIMITS, GainType
+from .const import PRESET_MAX, PRESET_MIN
+from .coordinator import GainKey, IdrCoordinator
 from .entity import IdrEntity
 
-GAIN_STEP_DB: Final = 0.5
+GAIN_STEP = 0.5
 
-_TRANSLATION_KEYS: Final[dict[GainType, str]] = {
+_TRANSLATION_KEYS: dict[GainType, str] = {
     GainType.INPUT: "input_gain",
     GainType.OUTPUT: "output_gain",
     GainType.CROSSPOINT: "crosspoint_gain",
@@ -25,97 +26,93 @@ _TRANSLATION_KEYS: Final[dict[GainType, str]] = {
 }
 
 
-def _placeholders(kind: GainType, indices: tuple[int, ...]) -> dict[str, str]:
-    """Return the values that are filled in the translated entity name."""
-    if kind == GainType.CROSSPOINT:
-        return {"input": str(indices[0]), "output": str(indices[1])}
-    if kind in (
-        GainType.INPUT_GROUP,
-        GainType.OUTPUT_GROUP,
-        GainType.CROSSPOINT_GROUP,
-    ):
-        return {"group": str(indices[0])}
-    return {"channel": str(indices[0])}
+def _placeholders(key: GainKey) -> dict[str, str]:
+    """Build the translation placeholders for a gain's friendly name."""
+    if key.gain_type is GainType.CROSSPOINT:
+        return {"input": str(key.channels[0]), "output": str(key.channels[1])}
+    return {"channel": str(key.channels[0])}
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: IdrConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the iDR number entities."""
-    coordinator = entry.runtime_data
+    """Set up iDR number entities (preset recall + gains)."""
+    coordinator: IdrCoordinator = entry.runtime_data
     entities: list[NumberEntity] = [IdrPresetNumber(coordinator)]
-    entities.extend(IdrGainNumber(coordinator, key) for key in coordinator.gain_keys)
+    entities.extend(IdrGainNumber(coordinator, key) for key in coordinator.options.gain_keys())
     async_add_entities(entities)
 
 
 class IdrPresetNumber(IdrEntity, NumberEntity):
-    """The current preset. Setting a value recalls that preset."""
+    """Recalls an iDR preset by number."""
 
     _attr_translation_key = "preset"
-    _attr_icon = "mdi:playlist-play"
-    _attr_mode = NumberMode.BOX
     _attr_native_min_value = PRESET_MIN
     _attr_native_max_value = PRESET_MAX
     _attr_native_step = 1
+    _attr_mode = NumberMode.BOX
 
     def __init__(self, coordinator: IdrCoordinator) -> None:
-        """Initialise the preset entity."""
         super().__init__(coordinator, "preset")
 
     @property
     def native_value(self) -> float | None:
-        """Return the number of the current preset."""
+        """Return the currently active preset number."""
+        if self.coordinator.data is None:
+            return None
         return self.coordinator.data.preset
 
     async def async_set_native_value(self, value: float) -> None:
-        """Recall a preset."""
-        await self.coordinator.async_recall_preset(round(value))
+        """Recall the given preset."""
+        await self.coordinator.async_recall_preset(int(value))
 
 
 class IdrGainNumber(IdrEntity, NumberEntity):
-    """A gain in dB. The lowest value means that the gain is off (-inf)."""
+    """A single gain control on an iDR unit."""
 
-    _attr_native_step = GAIN_STEP_DB
+    _attr_mode = NumberMode.BOX
+    _attr_native_step = GAIN_STEP
     _attr_native_unit_of_measurement = "dB"
-    _attr_icon = "mdi:volume-high"
 
     def __init__(self, coordinator: IdrCoordinator, key: GainKey) -> None:
-        """Initialise a gain entity."""
-        kind, indices = key
-        name = "_".join([kind.value.lower(), *(str(index) for index in indices)])
-        super().__init__(coordinator, name)
-        lower, upper = GAIN_LIMITS[kind]
+        super().__init__(coordinator, f"gain_{key.unique_suffix}")
         self._key = key
-        self._lower = lower
-        self._attr_translation_key = _TRANSLATION_KEYS[kind]
-        self._attr_translation_placeholders = _placeholders(kind, indices)
-        self._attr_native_min_value = lower - 1
+        lower, upper = GAIN_LIMITS[key.gain_type]
+        # One extra step below the real minimum is reserved as the "off" sentinel,
+        # since the iDR's -Inf (off) state isn't a number on the normal dB scale.
+        self._attr_native_min_value = lower - GAIN_STEP
         self._attr_native_max_value = upper
+        self._attr_translation_key = _TRANSLATION_KEYS[key.gain_type]
+        self._attr_translation_placeholders = _placeholders(key)
 
     @property
     def available(self) -> bool:
-        """Return True when the gain could be read from the iDR."""
+        """Return whether this gain was present in the latest poll."""
         return super().available and self._key in self.coordinator.data.gains
 
     @property
     def native_value(self) -> float | None:
-        """Return the gain in dB, or the lowest value when it is off."""
-        gain = self.coordinator.data.gains.get(self._key)
-        if gain is None:
+        """Return the current gain, or the off-sentinel value when the channel is off."""
+        if self.coordinator.data is None:
             return None
-        return self._attr_native_min_value if gain == -math.inf else gain
+        value = self.coordinator.data.gains.get(self._key)
+        if value is None:
+            return None
+        if math.isinf(value):
+            return self._attr_native_min_value
+        return value
 
     @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Show whether the gain is off (-inf)."""
-        gain = self.coordinator.data.gains.get(self._key)
-        if gain is None:
+    def extra_state_attributes(self) -> dict[str, bool] | None:
+        """Expose whether the channel is currently off (``-Inf`` gain)."""
+        if self.coordinator.data is None:
             return None
-        return {"off": gain == -math.inf}
+        value = self.coordinator.data.gains.get(self._key)
+        if value is None:
+            return None
+        return {"off": math.isinf(value)}
 
     async def async_set_native_value(self, value: float) -> None:
-        """Set the gain. Values below the lowest gain switch it off."""
-        gain = -math.inf if value < self._lower else value
+        """Write a new gain, translating the off-sentinel back to ``-Inf``."""
+        gain = -math.inf if value <= self._attr_native_min_value else value
         await self.coordinator.async_write_gain(self._key, gain)
