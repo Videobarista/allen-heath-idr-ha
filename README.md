@@ -9,6 +9,7 @@
 [![HACS Validate](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hacs.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/hacs.yml)
 [![CodeQL](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/codeql.yml)
 [![Tests](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Videobarista/allen-heath-idr-ha/actions/workflows/tests.yml)
+[![Aligned with the Home Assistant quality scale: Bronze](https://img.shields.io/badge/HA%20quality%20scale-Bronze%20(aligned)-cd7f32)](custom_components/allen_heath_idr/quality_scale.yaml)
 
 [![Open your Home Assistant instance and open this repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Videobarista&repository=allen-heath-idr-ha&category=integration)
 
