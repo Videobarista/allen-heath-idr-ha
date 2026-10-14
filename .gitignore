@@ -1,16 +1,13 @@
-# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 .venv/
 venv/
-
-# Tools and editors
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
-.idea/
 .vscode/
-
-# macOS
+.idea/
 .DS_Store
