@@ -23,6 +23,7 @@ from .client import (
     IdrConnectionError,
     IdrError,
     MuteType,
+    describe_error,
 )
 from .const import (
     CONF_CROSSPOINTS,
@@ -234,7 +235,7 @@ class IdrCoordinator(DataUpdateCoordinator[IdrData]):
         except IdrConnectionError as err:
             return self._offline_data(err)
         except IdrError as err:
-            raise UpdateFailed(f"The iDR reported a problem: {err}") from err
+            raise UpdateFailed(f"The iDR reported a problem: {describe_error(err)}") from err
 
         if self.is_offline:
             _LOGGER.info("The iDR at %s:%s is back online", self.client.host, self.client.port)

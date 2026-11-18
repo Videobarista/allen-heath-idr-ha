@@ -134,6 +134,20 @@ def format_mute(value: bool) -> str:
     return "ON" if value else "OFF"
 
 
+def describe_error(err: BaseException) -> str:
+    """Return a readable reason for an exception, never an empty string.
+
+    A timeout carries no message of its own, which used to leave log lines
+    ending in a bare colon ("Cannot connect to 10.0.0.5:23: ").
+    """
+    text = str(err).strip()
+    if text:
+        return text
+    if isinstance(err, TimeoutError):
+        return "timed out"
+    return type(err).__name__
+
+
 def is_valid_password(password: str) -> bool:
     """Return whether a password can be sent safely over the Telnet protocol.
 
@@ -214,7 +228,9 @@ class IdrClient:
             )
         except (TimeoutError, OSError, OverflowError, ValueError) as err:
             # OverflowError/ValueError: an out-of-range port or a malformed host.
-            raise IdrConnectionError(f"Cannot connect to {self._host}:{self._port}: {err}") from err
+            raise IdrConnectionError(
+                f"Cannot connect to {self._host}:{self._port}: {describe_error(err)}"
+            ) from err
 
         try:
             banner, needs_password = await self._async_read_banner()
@@ -293,7 +309,7 @@ class IdrClient:
             reply = await self._async_read_until_terminator()
         except OSError as err:
             raise IdrConnectionError(
-                f"Connection to {self._host}:{self._port} dropped: {err}"
+                f"Connection to {self._host}:{self._port} dropped: {describe_error(err)}"
             ) from err
 
         payload = self._strip_prompt(reply)
@@ -319,7 +335,7 @@ class IdrClient:
                 f"The iDR sent a reply longer than {MAX_REPLY_BYTES} bytes"
             ) from err
         except (TimeoutError, OSError) as err:
-            raise IdrConnectionError(f"Timed out waiting for the iDR to reply: {err}") from err
+            raise IdrConnectionError(f"No reply from the iDR: {describe_error(err)}") from err
         return raw.decode("ascii", errors="replace").rstrip("\x00")
 
     async def _async_read_banner(self) -> tuple[str, bool]:
@@ -348,10 +364,10 @@ class IdrClient:
                     if buffer.rstrip().endswith(b"Password:"):
                         return buffer.decode("ascii", errors="replace"), True
         except TimeoutError as err:
-            raise IdrConnectionError(f"Timed out waiting for the iDR to reply: {err}") from err
+            raise IdrConnectionError(f"No reply from the iDR: {describe_error(err)}") from err
         except OSError as err:
             raise IdrConnectionError(
-                f"Connection to {self._host}:{self._port} dropped: {err}"
+                f"Connection to {self._host}:{self._port} dropped: {describe_error(err)}"
             ) from err
 
     def _require_writer(self) -> asyncio.StreamWriter:

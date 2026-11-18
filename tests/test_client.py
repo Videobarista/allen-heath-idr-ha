@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncGenerator
 import math
 
@@ -18,6 +19,7 @@ from custom_components.allen_heath_idr.client import (
     IdrConnectionError,
     IdrProtocolError,
     MuteType,
+    describe_error,
     format_gain,
     format_mute,
     is_valid_password,
@@ -230,3 +232,33 @@ def test_sanitize_text() -> None:
     """Device text loses control characters and surrounding whitespace."""
     assert sanitize_text("  Hall\x00 A\t ", 64) == "Hall A"
     assert sanitize_text("abcdef", 3) == "abc"
+
+
+# --- Readable error messages ------------------------------------------------------
+
+
+def test_describe_error_is_never_empty() -> None:
+    """Exceptions without a message still produce a readable reason."""
+    assert describe_error(TimeoutError()) == "timed out"
+    assert describe_error(OSError()) == "OSError"
+    assert describe_error(ConnectionRefusedError(111, "Connection refused")) == (
+        "[Errno 111] Connection refused"
+    )
+
+
+async def test_silent_device_reports_a_readable_timeout() -> None:
+    """A device that accepts the connection but never answers gives a clear reason."""
+
+    async def silent(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.read()
+        writer.close()
+
+    server = await asyncio.start_server(silent, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    idr_client = IdrClient("127.0.0.1", port, connect_timeout=1, command_timeout=0.5)
+    try:
+        with pytest.raises(IdrConnectionError, match="timed out$"):
+            await idr_client.async_get_unit_name()
+    finally:
+        server.close()
+        await server.wait_closed()

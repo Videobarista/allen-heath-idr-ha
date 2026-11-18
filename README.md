@@ -24,6 +24,7 @@ are trademarks of their respective owner.
 
 | Version | Notes |
 |---|---|
+| 1.4.1 | Clearer connection error messages: a timeout now reads "timed out" instead of ending in an empty colon. |
 | 1.4.0 | Security hardening: stricter input checks (host, port, password, service gains), defensive handling of malformed or oversized replies from the device, automatic poll pacing for very large matrices, least-privilege CI with pinned actions. No change in normal behavior. |
 | 1.3.0 | Clearer device page: "Active preset" at the top, crosspoints moved to the Configuration section; entities left behind by older versions (or by lowering channel counts in the options) are cleaned up automatically; restored the "Unit name" diagnostic sensor. |
 | 1.2.1 | A switched-off iDR no longer writes an error to the Home Assistant log: going offline and coming back are logged once each, at info level. |
