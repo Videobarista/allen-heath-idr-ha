@@ -38,7 +38,9 @@
     "error": {
       "cannot_connect": "Could not reach the iDR. Check the host/port and that the unit is switched on and connected to the network.",
       "invalid_auth": "The iDR rejected the password.",
-      "invalid_response": "The iDR responded in a way this integration doesn't understand."
+      "invalid_response": "The iDR responded in a way this integration doesn't understand.",
+      "invalid_host": "That doesn't look like a valid IP address or hostname.",
+      "invalid_password_chars": "The password can only contain printable ASCII characters (letters, digits and common symbols, no accents or line breaks)."
     },
     "abort": {
       "already_configured": "This iDR unit is already configured.",

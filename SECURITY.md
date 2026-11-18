@@ -15,3 +15,7 @@ Note that this integration only talks to a device on your local network
 over plain, unencrypted Telnet — the Allen & Heath iDR control protocol
 itself provides no encryption and sends any configured password in plain
 text. This integration does not expose any inbound network service itself.
+
+For hardening advice (VLAN, firewall rules, Telnet password) and what the
+integration itself does to stay safe, see the "Security" section of the
+[README](README.md#security).

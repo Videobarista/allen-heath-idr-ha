@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+import voluptuous as vol
 
 from custom_components.allen_heath_idr.client import (
     IdrAuthError,
@@ -34,12 +35,12 @@ async def test_user_flow_success(hass: HomeAssistant) -> None:
         assert result["type"] is FlowResultType.FORM
 
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {CONF_HOST: "10.99.99.25", CONF_PORT: 23}
+            result["flow_id"], {CONF_HOST: "192.0.2.10", CONF_PORT: 23}
         )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Studio iDR"
-    assert result["data"] == {CONF_HOST: "10.99.99.25", CONF_PORT: 23, CONF_PASSWORD: None}
+    assert result["data"] == {CONF_HOST: "192.0.2.10", CONF_PORT: 23, CONF_PASSWORD: None}
 
 
 @pytest.mark.parametrize(
@@ -57,7 +58,7 @@ async def test_user_flow_errors(hass: HomeAssistant, error: Exception, expected_
             DOMAIN, context={"source": config_entries.SOURCE_USER}
         )
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {CONF_HOST: "10.99.99.25", CONF_PORT: 23}
+            result["flow_id"], {CONF_HOST: "192.0.2.10", CONF_PORT: 23}
         )
 
     assert result["type"] is FlowResultType.FORM
@@ -67,7 +68,7 @@ async def test_user_flow_errors(hass: HomeAssistant, error: Exception, expected_
 async def test_user_flow_aborts_on_duplicate(hass: HomeAssistant) -> None:
     """A second entry for the same host/port is rejected."""
     MockConfigEntry(
-        domain=DOMAIN, data={CONF_HOST: "10.99.99.25", CONF_PORT: 23, CONF_PASSWORD: None}
+        domain=DOMAIN, data={CONF_HOST: "192.0.2.10", CONF_PORT: 23, CONF_PASSWORD: None}
     ).add_to_hass(hass)
 
     with patch(_VALIDATE, AsyncMock(return_value=VALID_IDENTITY)):
@@ -75,7 +76,7 @@ async def test_user_flow_aborts_on_duplicate(hass: HomeAssistant) -> None:
             DOMAIN, context={"source": config_entries.SOURCE_USER}
         )
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {CONF_HOST: "10.99.99.25", CONF_PORT: 23}
+            result["flow_id"], {CONF_HOST: "192.0.2.10", CONF_PORT: 23}
         )
 
     assert result["type"] is FlowResultType.ABORT
@@ -85,7 +86,7 @@ async def test_user_flow_aborts_on_duplicate(hass: HomeAssistant) -> None:
 async def test_reauth_flow_success(hass: HomeAssistant) -> None:
     """A successful reauth updates the stored password."""
     entry = MockConfigEntry(
-        domain=DOMAIN, data={CONF_HOST: "10.99.99.25", CONF_PORT: 23, CONF_PASSWORD: "old"}
+        domain=DOMAIN, data={CONF_HOST: "192.0.2.10", CONF_PORT: 23, CONF_PASSWORD: "old"}
     )
     entry.add_to_hass(hass)
 
@@ -110,7 +111,7 @@ async def test_reauth_flow_success(hass: HomeAssistant) -> None:
 async def test_reauth_flow_failure(hass: HomeAssistant) -> None:
     """A rejected password during reauth shows the form again with an error."""
     entry = MockConfigEntry(
-        domain=DOMAIN, data={CONF_HOST: "10.99.99.25", CONF_PORT: 23, CONF_PASSWORD: "old"}
+        domain=DOMAIN, data={CONF_HOST: "192.0.2.10", CONF_PORT: 23, CONF_PASSWORD: "old"}
     )
     entry.add_to_hass(hass)
 
@@ -191,3 +192,84 @@ async def test_options_flow(hass: HomeAssistant) -> None:
         assert entry.options["expose_crosspoints"] is True
     finally:
         await server.stop()
+
+
+# --- Input validation ------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("user_input", "field", "error"),
+    [
+        ({CONF_HOST: "bad host", CONF_PORT: 23}, CONF_HOST, "invalid_host"),
+        ({CONF_HOST: "   ", CONF_PORT: 23}, CONF_HOST, "invalid_host"),
+        (
+            {CONF_HOST: "192.0.2.10", CONF_PORT: 23, CONF_PASSWORD: "line\rbreak"},
+            CONF_PASSWORD,
+            "invalid_password_chars",
+        ),
+        (
+            {CONF_HOST: "192.0.2.10", CONF_PORT: 23, CONF_PASSWORD: "wachtwoörd"},
+            CONF_PASSWORD,
+            "invalid_password_chars",
+        ),
+    ],
+)
+async def test_user_flow_rejects_bad_input(
+    hass: HomeAssistant, user_input: dict, field: str, error: str
+) -> None:
+    """Bad host or password values are caught before any connection attempt."""
+    validate = AsyncMock(return_value=VALID_IDENTITY)
+    with patch(_VALIDATE, validate):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {field: error}
+    validate.assert_not_called()
+
+
+async def test_user_flow_strips_host_whitespace(hass: HomeAssistant) -> None:
+    """Leading/trailing spaces around the host are removed, not stored."""
+    with patch(_VALIDATE, AsyncMock(return_value=VALID_IDENTITY)):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_HOST: "  192.0.2.10 ", CONF_PORT: 23}
+        )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_HOST] == "192.0.2.10"
+
+
+@pytest.mark.parametrize("port", [0, 70000])
+async def test_user_flow_rejects_out_of_range_port(hass: HomeAssistant, port: int) -> None:
+    """The form itself refuses ports outside 1-65535."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    with pytest.raises(vol.Invalid):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_HOST: "192.0.2.10", CONF_PORT: port}
+        )
+
+
+async def test_reauth_flow_rejects_unsafe_password(hass: HomeAssistant) -> None:
+    """Reauth applies the same password check as initial setup."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={CONF_HOST: "192.0.2.10", CONF_PORT: 23, CONF_PASSWORD: "old"}
+    )
+    entry.add_to_hass(hass)
+
+    validate = AsyncMock(return_value=VALID_IDENTITY)
+    with patch(_VALIDATE, validate):
+        result = await entry.start_reauth_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_PASSWORD: "new\rGET PRESET"}
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_PASSWORD: "invalid_password_chars"}
+    validate.assert_not_called()

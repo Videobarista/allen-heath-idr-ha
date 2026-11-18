@@ -30,6 +30,11 @@ class MockIdr:
         self.mutes: dict[tuple[str, tuple[int, ...]], bool] = {}
         self.drop_next_connection = False
         self.force_overrun_once = False
+        #: Sent verbatim (no prompt, no NUL) instead of the next reply, to
+        #: simulate a misbehaving device flooding the connection.
+        self.raw_reply_once: bytes | None = None
+        #: Sent verbatim instead of the normal welcome banner.
+        self.raw_banner: bytes | None = None
         self.connection_count = 0
         self.host = "127.0.0.1"
         self.port = 0
@@ -77,6 +82,12 @@ class MockIdr:
             writer.close()
             return
 
+        if self.raw_banner is not None:
+            writer.write(self.raw_banner)
+            await writer.drain()
+            await reader.read()  # hold the connection until the client gives up
+            return
+
         writer.write(b"Connected to iDR\r\n")
         await writer.drain()
 
@@ -105,6 +116,11 @@ class MockIdr:
             if command == "Bye":
                 writer.close()
                 return
+            if self.raw_reply_once is not None:
+                raw, self.raw_reply_once = self.raw_reply_once, None
+                writer.write(raw)
+                await writer.drain()
+                continue
             if self.force_overrun_once:
                 self.force_overrun_once = False
                 reply = "Buffer Overrun"

@@ -22,8 +22,19 @@ OFF_WORDS: Final[frozenset[str]] = frozenset({"-inf", "-infinity", "off"})
 _PROMPT_SUFFIX: Final = ">"
 _LINE_END: Final = "\r"
 _TERMINATOR: Final = b"\x00"
-_PASSWORD_PROMPT: Final = "password:"
+_PASSWORD_PROMPT: Final = "password:"  # noqa: S105 - the prompt text, not a credential
 _BYE_COMMAND: Final = "Bye"
+
+#: Upper bounds on what we accept from the device. Real replies are a few bytes
+#: (the longest, the built-in help text, is under 2 KB); anything far beyond
+#: that is garbage or a misbehaving device, and must not grow memory unbounded.
+MAX_REPLY_BYTES: Final = 8192
+MAX_BANNER_BYTES: Final = 4096
+MAX_UNIT_NAME_LENGTH: Final = 64
+
+#: Gains outside this band can't be valid for any iDR gain type; they're
+#: rejected before anything is sent rather than passed on as a huge number.
+_GAIN_SANITY_RANGE: Final = (-100.0, 20.0)
 
 
 class GainType(StrEnum):
@@ -95,9 +106,16 @@ def parse_gain(text: str) -> float:
 
 
 def format_gain(value: float) -> str:
-    """Format a gain value for sending to the iDR."""
+    """Format a gain value for sending to the iDR.
+
+    Raises IdrCommandError for NaN, +infinity or absurdly large values, so
+    those never reach the device as a malformed or overlong argument.
+    """
     if math.isinf(value) and value < 0:
         return "-INF"
+    low, high = _GAIN_SANITY_RANGE
+    if not math.isfinite(value) or not low <= value <= high:
+        raise IdrCommandError(f"Refusing to send an invalid gain value: {value!r}")
     return f"{value:.1f}"
 
 
@@ -114,6 +132,22 @@ def parse_mute(text: str) -> bool:
 def format_mute(value: bool) -> str:
     """Format a mute state for sending to the iDR."""
     return "ON" if value else "OFF"
+
+
+def is_valid_password(password: str) -> bool:
+    """Return whether a password can be sent safely over the Telnet protocol.
+
+    Only printable ASCII is allowed: a carriage return would end the password
+    early and turn the rest into a separate command, and non-ASCII characters
+    can't be encoded on this protocol at all.
+    """
+    return all(0x20 <= ord(char) < 0x7F for char in password)
+
+
+def sanitize_text(text: str, max_length: int) -> str:
+    """Strip control characters from device-supplied text and cap its length."""
+    cleaned = "".join(char for char in text if char.isprintable())
+    return cleaned.strip()[:max_length]
 
 
 class IdrClient:
@@ -171,12 +205,15 @@ class IdrClient:
         """Open the TCP connection and consume the welcome banner."""
         if self.connected:
             return
+        if self._password is not None and not is_valid_password(self._password):
+            raise IdrAuthError("The configured password contains characters the iDR can't receive")
         try:
             self._reader, self._writer = await asyncio.wait_for(
-                asyncio.open_connection(self._host, self._port),
+                asyncio.open_connection(self._host, self._port, limit=MAX_REPLY_BYTES),
                 timeout=self._connect_timeout,
             )
-        except (TimeoutError, OSError) as err:
+        except (TimeoutError, OSError, OverflowError, ValueError) as err:
+            # OverflowError/ValueError: an out-of-range port or a malformed host.
             raise IdrConnectionError(f"Cannot connect to {self._host}:{self._port}: {err}") from err
 
         try:
@@ -212,13 +249,14 @@ class IdrClient:
         try:
             writer.write((_BYE_COMMAND + _LINE_END).encode("ascii"))
             await writer.drain()
-        except OSError:
-            pass
+        except OSError as err:
+            # Saying goodbye is a courtesy; a connection that's already gone is fine.
+            _LOGGER.debug("Could not send Bye while closing: %s", err)
         try:
             writer.close()
             await writer.wait_closed()
-        except OSError:
-            pass
+        except OSError as err:
+            _LOGGER.debug("Error while closing the connection: %s", err)
 
     async def async_command(self, command: str) -> str:
         """Send a single command and return its reply.
@@ -242,6 +280,12 @@ class IdrClient:
             raise last_error or IdrConnectionError(f"Cannot reach {self._host}:{self._port}")
 
     async def _async_send(self, command: str) -> str:
+        if not command.isprintable():
+            # Commands are built internally from fixed words and numbers; this is
+            # a last line of defence against a line break ever sneaking in.
+            raise IdrCommandError(
+                f"Refusing to send a command with control characters: {command!r}"
+            )
         writer = self._require_writer()
         try:
             writer.write((command + _LINE_END).encode("ascii"))
@@ -267,6 +311,13 @@ class IdrClient:
             )
         except asyncio.IncompleteReadError as err:
             raise IdrConnectionError("The iDR closed the connection unexpectedly") from err
+        except asyncio.LimitOverrunError as err:
+            # The stream is out of step now; drop the connection so the next
+            # command starts clean instead of reading the rest of this garbage.
+            await self.async_close()
+            raise IdrProtocolError(
+                f"The iDR sent a reply longer than {MAX_REPLY_BYTES} bytes"
+            ) from err
         except (TimeoutError, OSError) as err:
             raise IdrConnectionError(f"Timed out waiting for the iDR to reply: {err}") from err
         return raw.decode("ascii", errors="replace").rstrip("\x00")
@@ -287,6 +338,10 @@ class IdrClient:
                     if not chunk:
                         raise IdrConnectionError("The iDR closed the connection unexpectedly")
                     buffer += chunk
+                    if len(buffer) > MAX_BANNER_BYTES:
+                        raise IdrProtocolError(
+                            f"The iDR sent a welcome message longer than {MAX_BANNER_BYTES} bytes"
+                        )
                     if _TERMINATOR in buffer:
                         text = buffer.decode("ascii", errors="replace").rstrip("\x00")
                         return text, False
@@ -326,8 +381,8 @@ class IdrClient:
         return "iDR"
 
     async def async_get_unit_name(self) -> str:
-        """Return the configured unit name."""
-        return await self.async_command("GetUnitName")
+        """Return the configured unit name, cleaned up for display."""
+        return sanitize_text(await self.async_command("GetUnitName"), MAX_UNIT_NAME_LENGTH)
 
     async def async_get_identity(self) -> IdrIdentity:
         """Return the model and unit name in a single round trip."""

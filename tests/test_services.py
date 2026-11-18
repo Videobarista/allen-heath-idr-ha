@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+import voluptuous as vol
 
 from custom_components.allen_heath_idr.client import GainType, MuteType
 from custom_components.allen_heath_idr.const import DOMAIN
@@ -101,5 +102,43 @@ async def test_set_crosspoint_unknown_entity(hass: HomeAssistant) -> None:
                 },
                 blocking=True,
             )
+    finally:
+        await server.stop()
+
+
+@pytest.mark.parametrize("gain", ["nan", "inf", "1e300", 5.0, -41])
+async def test_set_crosspoint_rejects_invalid_gain(hass: HomeAssistant, gain: object) -> None:
+    """Gains outside -40..0 dB (or NaN/infinity) never reach the device."""
+    server = MockIdr()
+    await server.start()
+    try:
+        entry = await _setup_entry(hass, server)
+        entity_id = _crosspoint_gain_entity_id(hass, entry)
+        with pytest.raises((vol.Invalid, ServiceValidationError)):
+            await hass.services.async_call(
+                DOMAIN,
+                SERVICE_SET_CROSSPOINT,
+                {"entity_id": [entity_id], "input": 1, "output": 1, "gain": gain},
+                blocking=True,
+            )
+        assert ("XPGAIN", (1, 1)) not in server.gains
+    finally:
+        await server.stop()
+
+
+async def test_set_crosspoint_accepts_off(hass: HomeAssistant) -> None:
+    """The off-word still turns a crosspoint off."""
+    server = MockIdr()
+    await server.start()
+    try:
+        entry = await _setup_entry(hass, server)
+        entity_id = _crosspoint_gain_entity_id(hass, entry)
+        await hass.services.async_call(
+            DOMAIN,
+            SERVICE_SET_CROSSPOINT,
+            {"entity_id": [entity_id], "input": 1, "output": 1, "gain": "off"},
+            blocking=True,
+        )
+        assert server.gains[("XPGAIN", (1, 1))] == float("-inf")
     finally:
         await server.stop()

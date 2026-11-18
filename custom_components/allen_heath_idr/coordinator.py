@@ -56,6 +56,11 @@ GAIN_TOLERANCE_DB = 3.0
 CONNECT_RETRY_ATTEMPTS = 3
 CONNECT_RETRY_DELAY = 1.5
 
+#: Budget per Telnet command when deciding how often to poll. A real iDR answers
+#: in roughly 20 ms; budgeting twice that keeps the unit idle at least half the
+#: time, so its front panel and other controllers stay responsive.
+SECONDS_PER_COMMAND = 0.04
+
 
 class GainKey(NamedTuple):
     """Identifies a single gain reading/control."""
@@ -130,6 +135,22 @@ class IdrOptions:
             ]
         return keys
 
+    @property
+    def commands_per_poll(self) -> int:
+        """Return how many Telnet commands a full poll sends (preset + name + values)."""
+        return 2 + len(self.gain_keys()) + len(self.mute_keys())
+
+    @property
+    def effective_scan_interval(self) -> int:
+        """Return the poll interval actually used, never shorter than a poll takes x2.
+
+        With crosspoints at 16x16 a poll is ~600 commands; polling that every
+        couple of seconds would keep the iDR busy non-stop. The configured
+        interval is used as-is unless it's shorter than this floor.
+        """
+        floor = math.ceil(self.commands_per_poll * SECONDS_PER_COMMAND)
+        return max(self.scan_interval, floor)
+
     def mute_keys(self) -> list[MuteKey]:
         """Return every mute reading this configuration should poll/expose."""
         keys = [MuteKey(MuteType.INPUT, (ch,)) for ch in range(1, self.inputs + 1)]
@@ -185,12 +206,19 @@ class IdrCoordinator(DataUpdateCoordinator[IdrData]):
         self.options = IdrOptions.from_mapping({**entry.data, **entry.options})
         self._integration_version = integration_version
         self._unreadable: set[str] = set()
+        if self.options.effective_scan_interval > self.options.scan_interval:
+            _LOGGER.debug(
+                "Poll interval raised from %ss to %ss for %s commands per poll",
+                self.options.scan_interval,
+                self.options.effective_scan_interval,
+                self.options.commands_per_poll,
+            )
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
             name=f"{entry.title} coordinator",
-            update_interval=timedelta(seconds=self.options.scan_interval),
+            update_interval=timedelta(seconds=self.options.effective_scan_interval),
         )
 
     @property
@@ -220,7 +248,7 @@ class IdrCoordinator(DataUpdateCoordinator[IdrData]):
                 "unavailable until it responds again, retrying every %ss",
                 self.client.host,
                 self.client.port,
-                self.options.scan_interval,
+                self.options.effective_scan_interval,
             )
         _LOGGER.debug("iDR poll failed: %s", err)
         unit_name = self.data.unit_name if self.data is not None else self.config_entry.title
@@ -268,7 +296,7 @@ class IdrCoordinator(DataUpdateCoordinator[IdrData]):
             preset = None
 
         try:
-            unit_name = await self.client.async_get_unit_name()
+            unit_name = await self.client.async_get_unit_name() or self.config_entry.title
         except IdrConnectionError:
             raise
         except IdrError as err:

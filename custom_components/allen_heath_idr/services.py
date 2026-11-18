@@ -13,7 +13,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
-from .client import OFF_WORDS, GainType, MuteType
+from .client import GAIN_LIMITS, OFF_WORDS, GainType, MuteType
 from .const import DOMAIN
 from .coordinator import GainKey, IdrCoordinator, MuteKey
 
@@ -27,14 +27,24 @@ ATTR_MUTE = "mute"
 _CHANNEL_NUMBER = vol.All(vol.Coerce(int), vol.Range(min=1, max=16))
 
 
+_CROSSPOINT_GAIN_MIN, _CROSSPOINT_GAIN_MAX = GAIN_LIMITS[GainType.CROSSPOINT]
+
+
 def _validate_gain(value: Any) -> float:
-    """Accept a numeric dB value or one of the iDR's off-words."""
+    """Accept a crosspoint gain in dB (-40 to 0) or one of the iDR's off-words."""
     if isinstance(value, str) and value.strip().lower() in OFF_WORDS:
         return -math.inf
     try:
-        return float(value)
+        gain = float(value)
     except (TypeError, ValueError) as err:
         raise vol.Invalid(f"Not a valid gain: {value!r}") from err
+    # Also rejects NaN and +/-infinity, which float() happily accepts as text.
+    if not _CROSSPOINT_GAIN_MIN <= gain <= _CROSSPOINT_GAIN_MAX:
+        raise vol.Invalid(
+            f"Gain must be between {_CROSSPOINT_GAIN_MIN:g} and {_CROSSPOINT_GAIN_MAX:g} dB, "
+            f'or "off": got {value!r}'
+        )
+    return gain
 
 
 SET_CROSSPOINT_SCHEMA = vol.Schema(

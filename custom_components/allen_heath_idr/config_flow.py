@@ -10,6 +10,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT
 from homeassistant.core import callback
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
@@ -20,7 +21,14 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
-from .client import IdrAuthError, IdrClient, IdrConnectionError, IdrError, IdrIdentity
+from .client import (
+    IdrAuthError,
+    IdrClient,
+    IdrConnectionError,
+    IdrError,
+    IdrIdentity,
+    is_valid_password,
+)
 from .const import (
     CONF_CROSSPOINTS,
     CONF_GROUPS,
@@ -45,12 +53,39 @@ PASSWORD_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWO
 USER_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
-        vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
+        vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
         vol.Optional(CONF_PASSWORD): PASSWORD_SELECTOR,
     }
 )
 
 REAUTH_SCHEMA = vol.Schema({vol.Required(CONF_PASSWORD): PASSWORD_SELECTOR})
+
+#: Longest valid DNS name; nothing longer can be a real host.
+MAX_HOST_LENGTH = 253
+
+
+def _check_host(host: str) -> bool:
+    """Return whether a host looks like a usable IP address or hostname."""
+    return (
+        0 < len(host) <= MAX_HOST_LENGTH
+        and host.isprintable()
+        and not any(char.isspace() for char in host)
+    )
+
+
+def _parse_connection_input(
+    user_input: dict[str, Any],
+) -> tuple[str, int, str | None, dict[str, str]]:
+    """Clean up and check host/port/password, returning them plus any form errors."""
+    errors: dict[str, str] = {}
+    host = str(user_input[CONF_HOST]).strip()
+    if not _check_host(host):
+        errors[CONF_HOST] = "invalid_host"
+    port = int(user_input.get(CONF_PORT, DEFAULT_PORT))
+    password = user_input.get(CONF_PASSWORD) or None
+    if password is not None and not is_valid_password(password):
+        errors[CONF_PASSWORD] = "invalid_password_chars"
+    return host, port, password, errors
 
 
 async def _async_validate(host: str, port: int, password: str | None) -> IdrIdentity:
@@ -80,17 +115,14 @@ class IdrConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            host = user_input[CONF_HOST]
-            port = user_input.get(CONF_PORT, DEFAULT_PORT)
-            password = user_input.get(CONF_PASSWORD)
-
-            self._async_abort_entries_match({CONF_HOST: host, CONF_PORT: port})
-
-            try:
-                identity = await _async_validate(host, port, password)
-            except IdrError as err:
-                errors["base"] = _error_key(err)
-            else:
+            host, port, password, errors = _parse_connection_input(user_input)
+            if not errors:
+                self._async_abort_entries_match({CONF_HOST: host, CONF_PORT: port})
+                try:
+                    identity = await _async_validate(host, port, password)
+                except IdrError as err:
+                    errors["base"] = _error_key(err)
+            if not errors:
                 return self.async_create_entry(
                     title=identity.unit_name or host,
                     data={CONF_HOST: host, CONF_PORT: port, CONF_PASSWORD: password},
@@ -112,11 +144,14 @@ class IdrConfigFlow(ConfigFlow, domain=DOMAIN):
             host = reauth_entry.data[CONF_HOST]
             port = reauth_entry.data.get(CONF_PORT, DEFAULT_PORT)
             password = user_input[CONF_PASSWORD]
-            try:
-                await _async_validate(host, port, password)
-            except IdrError as err:
-                errors["base"] = _error_key(err)
+            if not is_valid_password(password):
+                errors[CONF_PASSWORD] = "invalid_password_chars"
             else:
+                try:
+                    await _async_validate(host, port, password)
+                except IdrError as err:
+                    errors["base"] = _error_key(err)
+            if not errors:
                 return self.async_update_reload_and_abort(
                     reauth_entry, data={**reauth_entry.data, CONF_PASSWORD: password}
                 )
@@ -132,14 +167,13 @@ class IdrConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         reconfigure_entry = self._get_reconfigure_entry()
         if user_input is not None:
-            host = user_input[CONF_HOST]
-            port = user_input.get(CONF_PORT, DEFAULT_PORT)
-            password = user_input.get(CONF_PASSWORD)
-            try:
-                identity = await _async_validate(host, port, password)
-            except IdrError as err:
-                errors["base"] = _error_key(err)
-            else:
+            host, port, password, errors = _parse_connection_input(user_input)
+            if not errors:
+                try:
+                    identity = await _async_validate(host, port, password)
+                except IdrError as err:
+                    errors["base"] = _error_key(err)
+            if not errors:
                 return self.async_update_reload_and_abort(
                     reconfigure_entry,
                     title=identity.unit_name or host,

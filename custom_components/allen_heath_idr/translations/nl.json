@@ -38,7 +38,9 @@
     "error": {
       "cannot_connect": "Kan de iDR niet bereiken. Controleer host/poort en of het apparaat aan staat en verbonden is met het netwerk.",
       "invalid_auth": "De iDR heeft het wachtwoord afgewezen.",
-      "invalid_response": "De iDR reageerde op een manier die deze integratie niet begrijpt."
+      "invalid_response": "De iDR reageerde op een manier die deze integratie niet begrijpt.",
+      "invalid_host": "Dit lijkt geen geldig IP-adres of geldige hostnaam.",
+      "invalid_password_chars": "Het wachtwoord mag alleen gewone ASCII-tekens bevatten (letters, cijfers en gangbare leestekens, geen accenten of regeleinden)."
     },
     "abort": {
       "already_configured": "Deze iDR is al geconfigureerd.",

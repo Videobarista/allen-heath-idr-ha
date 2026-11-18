@@ -24,6 +24,7 @@ are trademarks of their respective owner.
 
 | Version | Notes |
 |---|---|
+| 1.4.0 | Security hardening: stricter input checks (host, port, password, service gains), defensive handling of malformed or oversized replies from the device, automatic poll pacing for very large matrices, least-privilege CI with pinned actions. No change in normal behavior. |
 | 1.3.0 | Clearer device page: "Active preset" at the top, crosspoints moved to the Configuration section; entities left behind by older versions (or by lowering channel counts in the options) are cleaned up automatically; restored the "Unit name" diagnostic sensor. |
 | 1.2.1 | A switched-off iDR no longer writes an error to the Home Assistant log: going offline and coming back are logged once each, at info level. |
 | 1.2.0 | Setup no longer fails when the iDR is switched off at startup (it's assumed to simply be offline and polling keeps retrying); aligned the integration with the Home Assistant quality scale Bronze tier (tests, `quality_scale.yaml`). |
@@ -64,7 +65,9 @@ Copy `custom_components/allen_heath_idr` into your Home Assistant `config/custom
 
 - **Host** — the iDR's IP address or hostname.
 - **Port** — 23, unless you've changed it on the unit.
-- **Password** — only if a Telnet password is set on the unit.
+- **Password** — only if a Telnet password is set on the unit. Printable
+  ASCII only (letters, digits, common symbols): that's all the iDR's Telnet
+  protocol can carry.
 
 ### Options
 
@@ -76,7 +79,7 @@ After adding the integration, open its entry and click **Configure** to set:
 | Number of output channels | 8 | How many of the 16 possible outputs to expose. |
 | Expose groups | Off | Adds 16 entities (8 input + 8 output group gains). |
 | Expose crosspoints | Off | Adds a gain **and** a mute entity for every input/output pair — see below before turning this on. |
-| Poll interval | 10s | How often to poll. Lower reacts faster but puts more load on the iDR's single Telnet connection. |
+| Poll interval | 10s | How often to poll. Lower reacts faster but puts more load on the iDR's single Telnet connection. With very large matrices the integration raises this automatically (see below). |
 
 Most Home Assistant users don't expect an integration to have an options
 step at all — if **Configure** isn't greyed out on the integration's card,
@@ -95,6 +98,13 @@ what it takes to control a true mixing matrix (see below). Some examples:
 
 If you only need to script one or two crosspoints, the `set_crosspoint`
 service (below) does that without turning this option on at all.
+
+**Poll pacing.** Every value is read with its own Telnet command, one at a
+time. So the iDR is never kept busy non-stop, the poll interval is never
+shorter than about twice the time a full poll takes: 16 × 16 with
+crosspoints (~580 commands) polls at most every 24 s, even if you set 2 s.
+At the default 8 × 8 nothing changes. Changes you make from Home Assistant
+are still sent immediately.
 
 ## Entities
 
@@ -183,7 +193,7 @@ wizard does need to reach the iDR once, to read its name and model.
   for the next scheduled poll.
 - The Telnet connection is unencrypted, and a configured password is sent in
   plain text — this is a limitation of the iDR's own protocol, not something
-  this integration can change. Only use it on a network you trust.
+  this integration can change. See [Security](#security) below.
 - Password handling has not been verified against a real password-protected
   unit (the protocol document is slightly ambiguous about the exact bytes
   sent on a wrong password); if you hit trouble here, please open an issue
@@ -191,6 +201,39 @@ wizard does need to reach the iDR once, to read its name and model.
 - The iDR's firmware version isn't available over Telnet, so there's no
   sensor for it — only this integration's own version (see the "Integration
   version" diagnostic sensor).
+
+## Security
+
+What the integration does to protect itself and the device:
+
+- It opens **no ports** of its own (no webhooks, no listeners): it only makes
+  one outgoing TCP connection to the iDR on port 23, and keeps it open.
+- Nothing you type ends up as raw text in a device command. Commands are
+  built from fixed words and numbers only; the password is limited to
+  printable ASCII so it can never smuggle in a line break and a second
+  command.
+- Every value is range-checked before it's sent (gains, channels, presets,
+  port), and everything the device sends back is treated as untrusted:
+  replies have a size limit and a timeout, text is stripped of control
+  characters, and a garbled reply just drops and reopens the connection.
+- One command at a time, with automatic poll pacing, so the iDR is never
+  flooded. While it's offline, it's retried once per poll interval.
+- The password is stored the way Home Assistant stores all integration
+  credentials, and is never written to the log.
+
+What only your network can do — Telnet has no encryption, so anyone who
+can reach port 23 can control the unit:
+
+- Put the iDR in a separate **AV/control VLAN**.
+- Firewall: allow **only your Home Assistant host → iDR, TCP 23**, plus the
+  PC running Allen & Heath's own iDR software → the iDR. Block everything
+  else to the iDR, and give the iDR **no internet access**.
+- Set a Telnet password on the unit. It travels unencrypted, but it still
+  stops casual access from elsewhere on that network.
+- Not sure which ports your unit exposes? A scan from a trusted machine
+  (for example `nmap -p- <iDR-address>`) shows what to allow and block.
+
+Security issues can be reported privately, see [SECURITY.md](SECURITY.md).
 
 ## Quality scale
 

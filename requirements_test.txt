@@ -1,2 +1,6 @@
-pytest-homeassistant-custom-component
-pytest-cov
+# Pinned for reproducible CI. 0.13.316 is the last release that supports
+# Python 3.13 (it bundles Home Assistant 2026.2.3); later releases need 3.14,
+# and the package itself has since been superseded by HA's own
+# pytest-homeassistant. Moving to that is a separate, planned step.
+pytest-homeassistant-custom-component==0.13.316
+pytest-cov==7.0.0

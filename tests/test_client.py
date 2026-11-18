@@ -8,16 +8,22 @@ import math
 import pytest
 
 from custom_components.allen_heath_idr.client import (
+    MAX_BANNER_BYTES,
+    MAX_REPLY_BYTES,
+    MAX_UNIT_NAME_LENGTH,
     GainType,
     IdrAuthError,
     IdrClient,
     IdrCommandError,
     IdrConnectionError,
+    IdrProtocolError,
     MuteType,
     format_gain,
     format_mute,
+    is_valid_password,
     parse_gain,
     parse_mute,
+    sanitize_text,
 )
 
 from .mock_idr import MockIdr
@@ -149,3 +155,78 @@ def test_format_and_parse_mute() -> None:
     assert format_mute(False) == "OFF"
     assert parse_mute("ON") is True
     assert parse_mute("off") is False
+
+
+# --- Hardening: input that must never reach the device -------------------------
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, 1e300, -1e300])
+def test_format_gain_rejects_invalid_values(value: float) -> None:
+    """NaN, +infinity and absurd numbers are refused instead of sent."""
+    with pytest.raises(IdrCommandError):
+        format_gain(value)
+
+
+@pytest.mark.parametrize(
+    ("password", "valid"),
+    [("secret", True), ("with space!", True), ("line\rbreak", False), ("wachtwoörd", False)],
+)
+def test_is_valid_password(password: str, valid: bool) -> None:
+    """Only printable ASCII can be sent as a Telnet password."""
+    assert is_valid_password(password) is valid
+
+
+@pytest.mark.parametrize("password", ["sec\rGET PRESET", "wachtwoörd"])
+async def test_unsafe_password_is_never_sent(mock_idr: MockIdr, password: str) -> None:
+    """A password that could inject a command is rejected before connecting at all."""
+    mock_idr.password = "secret"  # noqa: S105 - test fixture, not a real credential
+    idr_client = IdrClient(
+        mock_idr.host, mock_idr.port, password, connect_timeout=2, command_timeout=2
+    )
+    with pytest.raises(IdrAuthError):
+        await idr_client.async_get_unit_name()
+    assert mock_idr.connection_count == 0
+
+
+async def test_out_of_range_port_raises_connection_error() -> None:
+    """An impossible port number is a clean connection error, not a crash."""
+    idr_client = IdrClient("127.0.0.1", 70000, connect_timeout=1, command_timeout=1)
+    with pytest.raises(IdrConnectionError):
+        await idr_client.async_get_unit_name()
+
+
+# --- Hardening: the device's replies are untrusted -----------------------------
+
+
+async def test_overlong_reply_is_rejected_and_connection_recovers(
+    client: IdrClient, mock_idr: MockIdr
+) -> None:
+    """A flood without a terminator is refused, and the next command works again."""
+    await client.async_get_unit_name()
+    mock_idr.raw_reply_once = b"A" * (MAX_REPLY_BYTES * 3)
+    with pytest.raises(IdrProtocolError):
+        await client.async_get_preset()
+    assert await client.async_get_preset() == 1
+
+
+async def test_overlong_banner_is_rejected(mock_idr: MockIdr) -> None:
+    """A welcome message that never ends can't grow memory without bound."""
+    mock_idr.raw_banner = b"B" * (MAX_BANNER_BYTES + 100)
+    idr_client = IdrClient(mock_idr.host, mock_idr.port, connect_timeout=2, command_timeout=2)
+    with pytest.raises(IdrProtocolError):
+        await idr_client.async_get_unit_name()
+    assert not idr_client.connected
+
+
+async def test_unit_name_is_sanitized(client: IdrClient, mock_idr: MockIdr) -> None:
+    """Control characters are stripped and the name is capped for display."""
+    mock_idr.unit_name = "Studio\x07 iDR\x1b" + "x" * 200
+    name = await client.async_get_unit_name()
+    assert name == ("Studio iDR" + "x" * 200)[:MAX_UNIT_NAME_LENGTH]
+    assert name.isprintable()
+
+
+def test_sanitize_text() -> None:
+    """Device text loses control characters and surrounding whitespace."""
+    assert sanitize_text("  Hall\x00 A\t ", 64) == "Hall A"
+    assert sanitize_text("abcdef", 3) == "abc"
