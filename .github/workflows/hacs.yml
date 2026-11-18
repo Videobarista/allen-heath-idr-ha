@@ -8,12 +8,18 @@ on:
     - cron: "0 0 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   hacs:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Deliberately not SHA-pinned: HACS's last tagged release is from 2022
+      # and its docs point to main, which carries the current checks. It runs
+      # read-only, with no secrets.
       - uses: hacs/action@main
         with:
           category: integration
